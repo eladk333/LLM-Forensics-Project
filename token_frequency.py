@@ -6,8 +6,8 @@ from transformers import GPT2Tokenizer
 from collections import Counter
 
 # Paths
-DATASET_PATH = '/content/drive/MyDrive/llm/wiki_103_full_cache.pt' # Path for the dataset
-CACHE_FOLDER = '/content/drive/MyDrive/llm' # Path for the output
+DATASET_PATH = 'G:/My Drive/llm/wiki_103_full_cache.pt' # Path for the dataset
+CACHE_FOLDER = 'G:/My Drive/llm/' # Path for the output
 OUTPUT_CSV = os.path.join(CACHE_FOLDER, 'wiki_token_frequencies.csv')
 
 def generate_frequency_of_tokens():

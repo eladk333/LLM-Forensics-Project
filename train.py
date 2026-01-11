@@ -29,7 +29,7 @@ BATCH_SIZE = 32 # Same for all models
 # N_EMBD  = 128  # Embedding Dimensio
 
 # Paths
-CHECKPOINT_FOLDER_PATH = 'G:/My Drive/llm//MinGPT_Checkpoints_7M_final' # Path for the model checkpoints
+CHECKPOINT_FOLDER_PATH = 'G:/My Drive/llm/MinGPT_Checkpoints_7M_final' # Path for the model checkpoints
 DATA_CACHE_PATH = 'G:/My Drive/llm' # Path for the dataset
 os.makedirs(CHECKPOINT_FOLDER_PATH, exist_ok=True) # If the model folder doesn't exist it creates it
 

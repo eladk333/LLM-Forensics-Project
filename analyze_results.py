@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import RadioButtons
+from matplotlib.widgets import Button
 import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
@@ -17,7 +17,7 @@ import os
 MODEL_SIZE = '7M'
 BASE_FOLDER = 'G:/My Drive/llm'
 FREQ_FILE = os.path.join(BASE_FOLDER, 'wiki_token_frequencies.csv')
-FEATURE_FILE = os.path.join(BASE_FOLDER, f'MinGPT_Checkpoints_{MODEL_SIZE}', 'final_frequency_dataset.csv')
+FEATURE_FILE = os.path.join(BASE_FOLDER, f'MinGPT_Checkpoints_{MODEL_SIZE}', 'norm_comparison_dataset.csv')
 
 print(f"📂 Loading Data...")
 if not os.path.exists(FREQ_FILE) or not os.path.exists(FEATURE_FILE):
@@ -38,21 +38,22 @@ y = df['log_count']
 features = ['embedding_norm', 'logit_norm']
 
 # ==========================================
-# 2. PRE-CALCULATE MODELS (80% Train / 20% Test)
+# 2. PRE-CALCULATE MODELS
 # ==========================================
-print("⚙️  Training Models (80% Train / 20% Test)...")
+print("⚙️  Training Models...")
 storage = {}
 
-# --- A. Single Feature Models ---
+# --- Train Individual Models (Slide 1 & 2) ---
 for feat in features:
     X = df[[feat]]
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     
+    # Simple models for the single-feature slides
     lin = LinearRegression().fit(X_train, y_train)
     mlp = make_pipeline(StandardScaler(), MLPRegressor((100, 50), activation='tanh', max_iter=1000, random_state=42))
     mlp.fit(X_train, y_train)
     
-    # Sort for clean lines
+    # Store sorted data for clean lines
     sorted_idx = X_test[feat].argsort()
     storage[feat] = {
         'X_test': X_test.iloc[sorted_idx],
@@ -63,7 +64,8 @@ for feat in features:
         'mlp_r2': r2_score(y_test, mlp.predict(X_test))
     }
 
-# --- B. Combined Model (Trained on Both, Projected on One) ---
+# --- Train Combined Model (Slide 3) ---
+# We use BOTH features to train, but we will plot against them individually
 X_comb = df[features]
 X_train, X_test, y_train, y_test = train_test_split(X_comb, y, test_size=0.2, random_state=42)
 
@@ -75,103 +77,104 @@ comb_r2 = r2_score(y_test, comb_preds)
 storage['combined'] = {
     'X_test': X_test, 
     'y_test': y_test, 
-    'preds': comb_preds,
+    'preds': comb_preds, # Predictions from the COMBINED model
     'r2': comb_r2
 }
 
-print("✅ Training Complete. Launching Menu...")
+print("✅ Training Complete. Launching Slideshow...")
 
 # ==========================================
-# 3. MENU VISUALIZATION LOGIC
+# 3. SLIDESHOW VISUALIZATION LOGIC
 # ==========================================
-class MenuViewer:
+class SlideshowViewer:
     def __init__(self):
-        self.fig = plt.figure(figsize=(15, 8))
-        
-        # 1. Setup the Menu Area (Left Side)
-        # [left, bottom, width, height]
-        self.menu_ax = plt.axes([0.02, 0.6, 0.15, 0.25], facecolor='#f0f0f0')
-        self.radio = RadioButtons(self.menu_ax, 
-                                  ('Spread (Embedding)', 'Spread (Logit)', 'Combined Model'))
-        
-        # Style the menu slightly
-        for circle in self.radio.circles:
-            circle.set_radius(0.05)
-
-        # 2. Map options to functions
-        self.funcs = {
-            'Spread (Embedding)': self.plot_feat1,
-            'Spread (Logit)': self.plot_feat2,
-            'Combined Model': self.plot_combined
-        }
-
-        # 3. Initial Draw
-        self.radio.on_clicked(self.update_plot)
-        self.update_plot('Spread (Embedding)')
-
-    def update_plot(self, label):
-        # Clear OLD plots, but keep the MENU (menu_ax)
-        for ax in self.fig.axes:
-            if ax != self.menu_ax:
-                ax.remove()
-        
-        # Execute the correct plotting function
-        plot_func = self.funcs[label]
-        plot_func()
-        
-        # Refresh
-        self.fig.canvas.draw_idle()
+        self.ind = 0
+        self.fig = plt.figure(figsize=(14, 8))
+        self.plot_functions = [self.plot_feat1, self.plot_feat2, self.plot_combined_projected]
+        self.update() 
 
     def plot_feat1(self):
-        # Create axes on the right side
-        ax = self.fig.add_axes([0.25, 0.1, 0.70, 0.8]) 
-        self._plot_single_feature(ax, 'embedding_norm', 
-                                  title="Visualizing the Spread of the Data (Embedding Norm)")
+        self._plot_single_feature('embedding_norm', 1)
 
     def plot_feat2(self):
-        ax = self.fig.add_axes([0.25, 0.1, 0.70, 0.8])
-        self._plot_single_feature(ax, 'logit_norm', 
-                                  title="Visualizing the Spread of the Data (Logit Norm)")
+        self._plot_single_feature('logit_norm', 2)
 
-    def _plot_single_feature(self, ax, feat, title):
+    def _plot_single_feature(self, feat, slide_num):
+        ax = self.fig.add_subplot(111)
         data = storage[feat]
         
-        # Actual Data Cloud
+        # Plot Actual Data (Grey Cloud)
         sns.scatterplot(x=data['X_test'][feat], y=data['y_test'], ax=ax, alpha=0.3, color='gray', label='Actual Data')
         
-        # Regressors
+        # Plot Single-Feature Models (Lines)
         ax.plot(data['X_test'][feat], data['lin_pred'], color='blue', lw=2, linestyle='--', label=f"Linear (R2={data['lin_r2']:.3f})")
         ax.plot(data['X_test'][feat], data['mlp_pred'], color='red', lw=3, label=f"MLP (R2={data['mlp_r2']:.3f})")
         
-        ax.set_title(title, fontsize=16)
+        ax.set_title(f"Slide {slide_num}: Prediction using ONLY {feat}", fontsize=16)
         ax.set_xlabel(feat)
         ax.set_ylabel("Log Frequency")
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-    def plot_combined(self):
-        # Create 2 subplots side-by-side on the right
-        # add_axes([left, bottom, width, height])
-        ax1 = self.fig.add_axes([0.25, 0.1, 0.33, 0.8])
-        ax2 = self.fig.add_axes([0.62, 0.1, 0.33, 0.8])
+    def plot_combined_projected(self):
+        # Create 2 subplots side-by-side
+        ax1 = self.fig.add_subplot(121)
+        ax2 = self.fig.add_subplot(122)
         
         data = storage['combined']
         X = data['X_test']
+        y = data['y_test']
+        preds = data['preds']
         
-        # View 1
-        sns.scatterplot(x=X['embedding_norm'], y=data['y_test'], ax=ax1, alpha=0.2, color='gray')
-        sns.scatterplot(x=X['embedding_norm'], y=data['preds'], ax=ax1, alpha=0.6, color='red', s=15, label='Combined Preds')
-        ax1.set_title("Projected on Embedding Norm")
+        # --- LEFT PLOT: Combined Model vs Embedding Norm ---
+        # 1. Actual Data
+        sns.scatterplot(x=X['embedding_norm'], y=y, ax=ax1, alpha=0.2, color='gray', label='Actual Data')
+        # 2. Combined Model Predictions (scattered because they depend on the OTHER feature too)
+        sns.scatterplot(x=X['embedding_norm'], y=preds, ax=ax1, alpha=0.6, color='red', s=15, label='Combined Model Preds')
+        
+        ax1.set_title("View 1: Projected on Embedding Norm", fontsize=12)
         ax1.set_xlabel("Embedding Norm")
-        
-        # View 2
-        sns.scatterplot(x=X['logit_norm'], y=data['y_test'], ax=ax2, alpha=0.2, color='gray')
-        sns.scatterplot(x=X['logit_norm'], y=data['preds'], ax=ax2, alpha=0.6, color='red', s=15, label='Combined Preds')
-        ax2.set_title("Projected on Logit Norm")
-        ax2.set_xlabel("Logit Norm")
-        
-        self.fig.text(0.5, 0.95, f"Combined Model Predictions (R2: {data['r2']:.3f})", ha='center', fontsize=16)
+        ax1.set_ylabel("Log Frequency")
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
 
-# Launch
-viewer = MenuViewer()
+        # --- RIGHT PLOT: Combined Model vs Logit Norm ---
+        # 1. Actual Data
+        sns.scatterplot(x=X['logit_norm'], y=y, ax=ax2, alpha=0.2, color='gray', label='Actual Data')
+        # 2. Combined Model Predictions
+        sns.scatterplot(x=X['logit_norm'], y=preds, ax=ax2, alpha=0.6, color='red', s=15, label='Combined Model Preds')
+        
+        ax2.set_title("View 2: Projected on Logit Norm", fontsize=12)
+        ax2.set_xlabel("Logit Norm")
+        ax2.set_ylabel("Log Frequency")
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        plt.suptitle(f"Slide 3: Combined Model Predictions (R2: {data['r2']:.3f})\n(Note: Red dots form a cloud because the model uses BOTH features)", fontsize=16)
+
+    def update(self):
+        self.fig.clf() 
+        self.plot_functions[self.ind]()
+        
+        # Re-add buttons
+        plt.subplots_adjust(bottom=0.2)
+        ax_prev = plt.axes([0.7, 0.05, 0.1, 0.075])
+        ax_next = plt.axes([0.81, 0.05, 0.1, 0.075])
+        
+        self.bprev = Button(ax_prev, 'Previous')
+        self.bprev.on_clicked(self.prev)
+        self.bnext = Button(ax_next, 'Next')
+        self.bnext.on_clicked(self.next)
+        
+        plt.draw()
+
+    def next(self, event):
+        self.ind = (self.ind + 1) % len(self.plot_functions)
+        self.update()
+
+    def prev(self, event):
+        self.ind = (self.ind - 1) % len(self.plot_functions)
+        self.update()
+
+viewer = SlideshowViewer()
 plt.show()

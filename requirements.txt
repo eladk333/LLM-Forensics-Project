@@ -2,3 +2,7 @@ torch
 transformers
 datasets
 seaborn
+scikit-learn
+pandas
+matplotlib
+numpy

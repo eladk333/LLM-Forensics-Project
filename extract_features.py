@@ -8,7 +8,7 @@ from mingpt.model import GPT
 from transformers import GPT2Tokenizer
 
 # Model config
-MODEL_SIZE = '7M'
+MODEL_SIZE = '124M'
 CONFIGS = {
     '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768},
     '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384},
@@ -16,7 +16,7 @@ CONFIGS = {
 }
 
 # Paths
-BASE_FOLDER = 'G:/My Drive/llm'
+BASE_FOLDER = r'C:\Users\elad.k.int\LLM-Forensics-Project\data\models'
 MODEL_PATH = os.path.join(BASE_FOLDER, f'MinGPT_Checkpoints_{MODEL_SIZE}')
 OUTPUT_FILE = os.path.join(MODEL_PATH, 'final_frequency_dataset.csv')
 
@@ -64,7 +64,7 @@ def extract_features():
 
 
     # Add the strings to the output
-    vocab_size = model.config.vocab_size
+    vocab_size = 50257
     token_strings = [tokenizer.decode([i]) for i in range(vocab_size)]
 
     # Dataframe for the output

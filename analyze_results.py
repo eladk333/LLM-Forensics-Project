@@ -15,8 +15,8 @@ import os
 # 1. CONFIGURATION & DATA LOADING
 # ==========================================
 MODEL_SIZES = ['7M', '30M', '124M'] 
-BASE_MODELS_FOLDER = r'C:\Users\elad.k.int\LLM-Forensics-Project\data\models'
-FREQ_FILE = r'C:\Users\elad.k.int\LLM-Forensics-Project\data\datasets\wiki\wiki_token_frequencies.csv'
+BASE_MODELS_FOLDER = r'G:\My Drive\llm\data\models'
+FREQ_FILE = r'G:\My Drive\llm\data\datasets\wiki\wiki_token_frequencies.csv'
 
 # --- DEFINING FEATURES HERE MAKES IT SCALABLE ---
 # Add any new column name here, and the entire code (training + GUI) updates automatically.

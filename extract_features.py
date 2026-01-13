@@ -9,7 +9,7 @@ from mingpt.model import GPT
 from transformers import GPT2Tokenizer
 
 # Model config
-MODEL_SIZE = '124M'
+MODEL_SIZE = '7M'
 CONFIGS = {
     '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768},
     '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384},
@@ -17,9 +17,10 @@ CONFIGS = {
 }
 
 # Paths
-BASE_FOLDER = r'C:\Users\elad.k.int\LLM-Forensics-Project\data\models'
+BASE_FOLDER = r'G:\My Drive\llm\data\models'
 MODEL_PATH = os.path.join(BASE_FOLDER, f'MinGPT_Checkpoints_{MODEL_SIZE}')
 OUTPUT_FILE = os.path.join(MODEL_PATH, 'final_frequency_dataset.csv')
+
 
 
 def load_model():

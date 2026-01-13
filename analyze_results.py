@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.widgets import RadioButtons
+from matplotlib.widgets import RadioButtons, CheckButtons, Button
 import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
@@ -18,8 +18,6 @@ MODEL_SIZES = ['7M', '30M', '124M']
 BASE_MODELS_FOLDER = r'G:\My Drive\llm\data\models'
 FREQ_FILE = r'G:\My Drive\llm\data\datasets\wiki\wiki_token_frequencies.csv'
 
-# --- DEFINING FEATURES HERE MAKES IT SCALABLE ---
-# Add any new column name here, and the entire code (training + GUI) updates automatically.
 FEATURE_CONFIG = {
     'embedding_norm': 'Embedding Norm',
     'logit_norm':     'Logit Norm',
@@ -31,11 +29,55 @@ FEATURE_CONFIG = {
     'weight_kurtosis': 'Kurtosis (New)',
     'token_len':       'Token Length (New)',
     'is_upper':        'Is Capitalized (New)'
-
 }
 FEATURES_LIST = list(FEATURE_CONFIG.keys())
 
-global_storage = {} 
+# Storage
+global_storage = {}     # Stores calculated results (predictions, R2 scores)
+global_dataframes = {}  # Stores raw dataframes for retraining
+
+# --- HELPER: TRAIN FUNCTION (Now Global) ---
+def train_and_store(X_data, y_data):
+    """
+    Trains Linear and MLP models on the provided X_data and y_data.
+    Returns a dictionary containing predictions, real values, and R2 scores.
+    """
+    if X_data.shape[1] == 0:
+        return None # Handle empty feature selection
+
+    X_train, X_test, y_train, y_test = train_test_split(X_data, y_data, test_size=0.2, random_state=42)
+    
+    # Linear Model
+    lin = LinearRegression().fit(X_train, y_train)
+    lin_pred = lin.predict(X_test)
+    lin_r2 = r2_score(y_test, lin_pred)
+
+    # MLP Model
+    # Reduced max_iter slightly for UI responsiveness, typically converges fast anyway
+    mlp = make_pipeline(StandardScaler(), MLPRegressor(hidden_layer_sizes=(100, 50), activation='tanh', max_iter=800, random_state=42))
+    mlp.fit(X_train, y_train)
+    mlp_pred = mlp.predict(X_test)
+    mlp_r2 = r2_score(y_test, mlp_pred)
+
+    # Sort for cleaner line plots (only if 1D)
+    if X_test.shape[1] == 1:
+        sort_idx = X_test.iloc[:, 0].argsort()
+        X_test_sorted = X_test.iloc[sort_idx]
+        y_test_sorted = y_test.iloc[sort_idx]
+        lin_pred_sorted = lin_pred[sort_idx]
+        mlp_pred_sorted = mlp_pred[sort_idx]
+    else:
+        # For multi-dimensional, we can't sort by "x", so keep original order
+        X_test_sorted, y_test_sorted = X_test, y_test
+        lin_pred_sorted, mlp_pred_sorted = lin_pred, mlp_pred
+
+    return {
+        'X_test': X_test_sorted, 'y_test': y_test_sorted,
+        'lin_pred': lin_pred_sorted, 'mlp_pred': mlp_pred_sorted,
+        'lin_pred_raw': lin_pred, 'mlp_pred_raw': mlp_pred,
+        'y_test_raw': y_test,
+        'lin_r2': lin_r2, 'mlp_r2': mlp_r2
+    }
 
 print(f"📂 Loading Data from: {BASE_MODELS_FOLDER}")
 
@@ -59,7 +101,6 @@ for size in MODEL_SIZES:
 
     # Load and Merge
     df_feat = pd.read_csv(feature_file)
-    # Check if new features exist in file before processing
     valid_features = [f for f in FEATURES_LIST if f in df_feat.columns]
     
     if not valid_features:
@@ -69,47 +110,22 @@ for size in MODEL_SIZES:
     df = pd.merge(df_freq, df_feat, on='token_id', how='inner')
     y = df['log_count']
     
-    global_storage[size] = {'features': valid_features} # Store valid features for this model
+    # Store raw data for retraining later
+    global_dataframes[size] = {'df': df, 'y': y, 'valid_features': valid_features}
+    global_storage[size] = {'features': valid_features}
 
-    # --- Helper Function ---
-    def train_and_store(X_data, y_data):
-        X_train, X_test, y_train, y_test = train_test_split(X_data, y_data, test_size=0.2, random_state=42)
-        
-        lin = LinearRegression().fit(X_train, y_train)
-        lin_pred = lin.predict(X_test)
-        lin_r2 = r2_score(y_test, lin_pred)
-
-        mlp = make_pipeline(StandardScaler(), MLPRegressor(hidden_layer_sizes=(100, 50), activation='tanh', max_iter=1000, random_state=42))
-        mlp.fit(X_train, y_train)
-        mlp_pred = mlp.predict(X_test)
-        mlp_r2 = r2_score(y_test, mlp_pred)
-
-        # Sort for line plots
-        if X_test.shape[1] == 1:
-            sort_idx = X_test.iloc[:, 0].argsort()
-            X_test_sorted = X_test.iloc[sort_idx]
-            y_test_sorted = y_test.iloc[sort_idx]
-            lin_pred_sorted = lin_pred[sort_idx]
-            mlp_pred_sorted = mlp_pred[sort_idx]
-        else:
-            X_test_sorted, y_test_sorted = X_test, y_test
-            lin_pred_sorted, mlp_pred_sorted = lin_pred, mlp_pred
-
-        return {
-            'X_test': X_test_sorted, 'y_test': y_test_sorted,
-            'lin_pred': lin_pred_sorted, 'mlp_pred': mlp_pred_sorted,
-            'lin_pred_raw': lin_pred, 'mlp_pred_raw': mlp_pred,
-            'y_test_raw': y_test,
-            'lin_r2': lin_r2, 'mlp_r2': mlp_r2
-        }
-
-    # Train Individual Features
-    print(f"   Training models for {size}...")
+    # Train Individual Features (Pre-calculate these as they are fast)
+    print(f"   Training individual feature models...")
     for feat in valid_features:
         global_storage[size][feat] = train_and_store(df[[feat]], y)
     
-    # Train Combined
+    # Train Initial Combined (All valid features)
+    print(f"   Training combined model...")
     global_storage[size]['combined'] = train_and_store(df[valid_features], y)
+    
+    # Store which features were used for the current 'combined' model
+    global_storage[size]['active_combined_features'] = valid_features
+
     print(f"   ✅ Done.")
 
 if not global_storage:
@@ -125,52 +141,63 @@ class ModularViewer:
     def __init__(self):
         self.models = list(global_storage.keys())
         self.current_model = self.models[0]
-        
-        # --- DYNAMIC MENU GENERATION ---
-        # Instead of hardcoding, we build the menu list from valid features
         self.view_types = ['Data Spread', 'Pred vs Actual']
         self.current_view_type = 'Data Spread'
         
-        # We start by selecting the first feature available for the current model
-        self.current_feature_key = global_storage[self.current_model]['features'][0] 
+        # Start with 'combined' view
+        self.current_feature_key = 'combined'
         
+        # Setup Figure
         self.fig = plt.figure(figsize=(16, 9))
         self.update()
 
     def _plot(self):
         # Determine if we are plotting a single feature or 'combined'
         is_combined = (self.current_feature_key == 'combined')
-        data = global_storage[self.current_model][self.current_feature_key]
         
-        # Get nice display name
+        # Handle case where training failed (e.g. 0 features selected)
+        if global_storage[self.current_model].get(self.current_feature_key) is None:
+            plt.clf()
+            plt.text(0.5, 0.5, "No features selected for training.\nPlease select at least one feature and click 'Retrain'.", 
+                     ha='center', va='center', fontsize=14)
+            return
+
+        data = global_storage[self.current_model][self.current_feature_key]
         display_name = FEATURE_CONFIG.get(self.current_feature_key, "Combined Features") if not is_combined else "Combined Features"
 
         if self.current_view_type == 'Data Spread':
             # --- DATA SPREAD LOGIC ---
             if is_combined:
-                 # Combined Spread (Show first 2 features as subplots for reference)
-                feats_to_show = global_storage[self.current_model]['features'][:2] # Take first 2 available features
-                ax1 = self.fig.add_subplot(121)
-                ax2 = self.fig.add_subplot(122)
+                # Combined Spread: Show the features that were actually used
+                active_feats = global_storage[self.current_model].get('active_combined_features', [])
                 
-                for idx, (ax, feat) in enumerate(zip([ax1, ax2], feats_to_show)):
+                # Show up to 2 features for reference
+                feats_to_show = active_feats[:2] 
+                
+                if not feats_to_show:
+                    plt.text(0.5, 0.5, "No active features to display.", ha='center')
+                    return
+
+                ax1 = self.fig.add_subplot(121)
+                ax2 = self.fig.add_subplot(122) if len(feats_to_show) > 1 else None
+                
+                axes_list = [ax1] if ax2 is None else [ax1, ax2]
+
+                for idx, (ax, feat) in enumerate(zip(axes_list, feats_to_show)):
                     label = FEATURE_CONFIG.get(feat, feat)
-                    feat_data = global_storage[self.current_model][feat] # Get raw data for that feature
                     
-                    # We plot the COMBINED prediction against the INDIVIDUAL feature axis
-                    # Note: X_test must match. Since we use random_state=42, indices align, 
-                    # but strictly speaking we should align by index. For visualization 7M/30M this is fine.
-                    # Ideally, we pull the specific column from the combined X_test.
-                    
+                    # Get the X data for this specific feature from the Test set
+                    # We look up the raw value in the original X_test stored in the result
                     col_data = data['X_test'][feat]
                     
                     sns.scatterplot(x=col_data, y=data['y_test'], ax=ax, alpha=0.2, color='gray')
-                    sns.scatterplot(x=col_data, y=data['mlp_pred'], ax=ax, alpha=0.6, color='red', s=15, label='Combined MLP Pred')
+                    sns.scatterplot(x=col_data, y=data['mlp_pred'], ax=ax, alpha=0.6, color='red', s=15, label='Combined Model Pred')
                     ax.set_xlabel(label)
                     ax.set_ylabel("Log Frequency")
                     ax.set_title(f"Projected on {label}")
                 
-                plt.suptitle(f"Combined Model Spread ({self.current_model}) - MLP R2: {data['mlp_r2']:.3f}", fontsize=16)
+                feature_count = len(active_feats)
+                plt.suptitle(f"Combined Model ({feature_count} features) - MLP R2: {data['mlp_r2']:.3f}", fontsize=16)
 
             else:
                 # Single Feature Spread
@@ -185,7 +212,7 @@ class ModularViewer:
                 ax.grid(True, alpha=0.3)
 
         elif self.current_view_type == 'Pred vs Actual':
-            # --- PRED VS ACTUAL LOGIC (Same for Single or Combined) ---
+            # --- PRED VS ACTUAL LOGIC ---
             y_true = data['y_test_raw']
             lin_pred = data['lin_pred_raw']
             mlp_pred = data['mlp_pred_raw']
@@ -211,33 +238,30 @@ class ModularViewer:
 
     def update(self):
         self.fig.clf() 
-        plt.subplots_adjust(left=0.35) # Make room for 3 menus
+        # Adjust layout to make room for controls on Left AND Right
+        plt.subplots_adjust(left=0.25, right=0.8) 
         
         self._plot()
 
-        # --- DYNAMIC MENUS ---
+        # --- LEFT SIDEBAR CONTROLS ---
         
         # 1. Model Selector
-        ax_mod = plt.axes([0.02, 0.75, 0.25, 0.15], facecolor='#e6e6e6')
+        ax_mod = plt.axes([0.02, 0.75, 0.18, 0.15], facecolor='#e6e6e6')
         ax_mod.set_title("1. Model Size", weight='bold')
         self.rad_mod = RadioButtons(ax_mod, self.models, active=self.models.index(self.current_model))
         self.rad_mod.on_clicked(self.set_model)
         
         # 2. View Type Selector
-        ax_view = plt.axes([0.02, 0.55, 0.25, 0.15], facecolor='#f0f0f0')
+        ax_view = plt.axes([0.02, 0.55, 0.18, 0.15], facecolor='#f0f0f0')
         ax_view.set_title("2. Graph Type", weight='bold')
         self.rad_view = RadioButtons(ax_view, self.view_types, active=self.view_types.index(self.current_view_type))
         self.rad_view.on_clicked(self.set_view)
 
-        # 3. Feature Selector (Dynamic!)
-        # We get the valid features for the CURRENT model + 'Combined'
+        # 3. Feature Focus Selector
         current_valid_feats = global_storage[self.current_model]['features'] + ['combined']
-        # Create display labels
         labels = [FEATURE_CONFIG.get(f, f).title() for f in current_valid_feats if f != 'combined'] + ['Combined Features']
         
-        # Determine active index safely
         try:
-            # Match current key to the new list
             if self.current_feature_key == 'combined':
                 active_idx = len(labels) - 1
             else:
@@ -246,19 +270,43 @@ class ModularViewer:
             active_idx = 0
             self.current_feature_key = current_valid_feats[0]
 
-        ax_feat = plt.axes([0.02, 0.1, 0.25, 0.4], facecolor='#fff')
-        ax_feat.set_title("3. Feature Selection", weight='bold')
+        ax_feat = plt.axes([0.02, 0.05, 0.18, 0.45], facecolor='#fff')
+        ax_feat.set_title("3. Focus Area", weight='bold')
         self.rad_feat = RadioButtons(ax_feat, labels, active=active_idx)
-        
-        # We need a closure or mapping to link label back to key
         self.label_to_key = dict(zip(labels, current_valid_feats))
         self.rad_feat.on_clicked(self.set_feature)
+
+        # --- RIGHT SIDEBAR CONTROLS (Combined Config) ---
+        # Only show/enable these if 'Combined Features' is selected
+        if self.current_feature_key == 'combined':
+            
+            # Title
+            plt.figtext(0.82, 0.90, "Combined Config", fontsize=12, weight='bold')
+            
+            # 4. Checkboxes for Features
+            # Get all potential features for this model
+            avail_feats = global_dataframes[self.current_model]['valid_features']
+            avail_labels = [FEATURE_CONFIG.get(f, f) for f in avail_feats]
+            
+            # Determine which are currently active in the stored model
+            active_feats = global_storage[self.current_model].get('active_combined_features', avail_feats)
+            actives = [f in active_feats for f in avail_feats]
+
+            ax_check = plt.axes([0.82, 0.20, 0.16, 0.65], frame_on=False)
+            self.check = CheckButtons(ax_check, avail_labels, actives)
+            
+            # Map labels back to feature keys for the callback
+            self.check_label_to_key = dict(zip(avail_labels, avail_feats))
+
+            # 5. Retrain Button
+            ax_btn = plt.axes([0.82, 0.05, 0.15, 0.08])
+            self.btn = Button(ax_btn, 'Retrain Model', color='lightblue', hovercolor='skyblue')
+            self.btn.on_clicked(self.retrain_combined)
 
         plt.draw()
 
     def set_model(self, label):
         self.current_model = label
-        # Reset feature if not available in new model
         if self.current_feature_key not in global_storage[self.current_model]['features'] and self.current_feature_key != 'combined':
              self.current_feature_key = global_storage[self.current_model]['features'][0]
         self.update()
@@ -269,6 +317,38 @@ class ModularViewer:
 
     def set_feature(self, label):
         self.current_feature_key = self.label_to_key[label]
+        self.update()
+
+    def retrain_combined(self, event):
+        """Callback to retrain the combined model with checked features."""
+        
+        # 1. Get checked status
+        # CheckButtons.get_status() returns a list of booleans matching the labels
+        status = self.check.get_status()
+        
+        # 2. Filter features
+        avail_feats = global_dataframes[self.current_model]['valid_features']
+        selected_features = [f for f, s in zip(avail_feats, status) if s]
+        
+        print(f"\n🔄 Retraining Combined Model for {self.current_model}...")
+        print(f"   Selected: {selected_features}")
+        
+        if not selected_features:
+            print("   ⚠️ No features selected!")
+            global_storage[self.current_model]['combined'] = None
+        else:
+            # 3. Retrain
+            df = global_dataframes[self.current_model]['df']
+            y = global_dataframes[self.current_model]['y']
+            
+            new_results = train_and_store(df[selected_features], y)
+            
+            # 4. Update Storage
+            global_storage[self.current_model]['combined'] = new_results
+            global_storage[self.current_model]['active_combined_features'] = selected_features
+            print(f"   ✅ Retraining Complete. R2: {new_results['mlp_r2']:.4f}")
+
+        # 5. Refresh Plot
         self.update()
 
 if __name__ == "__main__":

@@ -23,7 +23,15 @@ FREQ_FILE = r'C:\Users\elad.k.int\LLM-Forensics-Project\data\datasets\wiki\wiki_
 FEATURE_CONFIG = {
     'embedding_norm': 'Embedding Norm',
     'logit_norm':     'Logit Norm',
-    # 'token_length': 'Token Length'  <-- Example: Uncommenting this adds it to the GUI automatically
+    'weight_variance': 'Weight Variance', 
+    'weight_mean':     'Weight Mean',
+    'l1_norm':         'L1 Norm (New)',
+    'dist_to_center':  'Dist to Center (New)',
+    'weight_skew':     'Skewness (New)',
+    'weight_kurtosis': 'Kurtosis (New)',
+    'token_len':       'Token Length (New)',
+    'is_upper':        'Is Capitalized (New)'
+
 }
 FEATURES_LIST = list(FEATURE_CONFIG.keys())
 

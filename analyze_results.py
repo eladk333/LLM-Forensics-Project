@@ -33,25 +33,23 @@ FEATURE_CONFIG = {
 }
 FEATURES_LIST = list(FEATURE_CONFIG.keys())
 
-# Storage
-global_storage = {}     # Stores calculated results (predictions, R2 scores)
-global_dataframes = {}  # Stores raw dataframes for retraining
+# Like cache to avoid calculating stuff again
+global_storage = {}   
+global_dataframes = {}  
 
-# --- HELPER: TRAIN FUNCTION (Now Global) ---
 
-# --- HELPER: CACHING FUNCTIONS ---
-def save_cache():
-    """Saves the current global state to a pickle file."""
+# Saving progress to avoid reccalculating stuff
+def save_cache():   
     try:
         with open(CACHE_FILE, 'wb') as f:
             pickle.dump({'storage': global_storage, 'dfs': global_dataframes}, f)
-        print("💾 Cache saved successfully.")
+        print("Cache saved successfully.")
     except Exception as e:
-        print(f"⚠️ Could not save cache: {e}")
+        print(f"Failed to save cache: {e}")
 
-def load_cache():
-    """Loads state from pickle file if it exists and is fresh."""
-    if not os.path.exists(CACHE_FILE):
+# Checks if the prediction models were trained or we need to train.
+def load_cache():    
+    if not os.path.exists(CACHE_FILE): # Checks if there is a cache file
         return False
     
     # Check if cache is older than the frequency file (Data changed?)
@@ -71,27 +69,36 @@ def load_cache():
     except Exception as e:
         print(f"⚠️ Cache found but corrupted: {e}")
         return False
-def train_and_store(X_data, y_data):
-    """
-    Trains Linear and MLP models on the provided X_data and y_data.
-    Returns a dictionary containing predictions, real values, and R2 scores.
-    """
-    if X_data.shape[1] == 0:
-        return None # Handle empty feature selection
 
-    X_train, X_test, y_train, y_test = train_test_split(X_data, y_data, test_size=0.2, random_state=42)
+# Train the 2 predictor models  
+def train_and_store(X_data, y_data):
+    # Handles empty feature selection
+    if X_data.shape[1] == 0:
+        return None 
+
+    # Splits the data into 80 percent for training and 20 percent for testing
+    X_train, X_test, y_train, y_test = train_test_split(X_data, y_data, test_size=0.2, random_state=42) # seed 42 for it not to change between runs
     
     # Linear Model
-    lin = LinearRegression().fit(X_train, y_train)
-    lin_pred = lin.predict(X_test)
-    lin_r2 = r2_score(y_test, lin_pred)
+    lin = LinearRegression().fit(X_train, y_train) # Trains the model
+    lin_pred = lin.predict(X_test) # The prediction of the model y_hat
+    lin_r2 = r2_score(y_test, lin_pred) # R2 how good the model explains the data
 
-    # MLP Model
-    # Reduced max_iter slightly for UI responsiveness, typically converges fast anyway
-    mlp = make_pipeline(StandardScaler(), MLPRegressor(hidden_layer_sizes=(100, 50), activation='tanh', max_iter=800, random_state=42))
-    mlp.fit(X_train, y_train)
-    mlp_pred = mlp.predict(X_test)
-    mlp_r2 = r2_score(y_test, mlp_pred)
+    # MLP Model    
+    mlp = make_pipeline( # Creates the model
+        StandardScaler(), # To normalize the data
+          MLPRegressor( # The MLP config settings
+              hidden_layer_sizes=(100, 50), # Two layers, first with 100 neurons and second with 50
+                activation='tanh', # Activation function
+                  max_iter=2000, # Let the model train for a long time to avoid underfitting
+                  early_stopping=True, # To prevent overfitting
+                  validation_fraction=0.1,
+                  n_iter_no_change=10, # If no improvment after 10 rounds we stop training
+                  random_state=42))
+    
+    mlp.fit(X_train, y_train) # Train the model
+    mlp_pred = mlp.predict(X_test) # The prediction of the model y_hat
+    mlp_r2 = r2_score(y_test, mlp_pred) # R2 how good the model explains the data
 
     # Sort for cleaner line plots (only if 1D)
     if X_test.shape[1] == 1:
@@ -113,70 +120,9 @@ def train_and_store(X_data, y_data):
         'lin_r2': lin_r2, 'mlp_r2': mlp_r2
     }
 
-print(f"📂 Loading Data from: {BASE_MODELS_FOLDER}")
-
-# 1. Try to Load from Cache First
-if not load_cache():
-    
-    # 2. If Cache failed/missing, Load Real Data and Train
-    if os.path.exists(FREQ_FILE):
-        df_freq = pd.read_csv(FREQ_FILE)
-        print(f"✅ Frequency file loaded ({len(df_freq)} tokens)")
-    else:
-        print(f"❌ Frequency file not found at {FREQ_FILE}")
-        exit()
-
-    # Train Models Loop
-    for size in MODEL_SIZES:
-        print(f"\n--- Processing Model: {size} ---")
-        
-        feature_file = os.path.join(BASE_MODELS_FOLDER, f'MinGPT_Checkpoints_{size}', 'final_frequency_dataset.csv')
-        
-        if not os.path.exists(feature_file):
-            print(f"⚠️  Feature file not found for {size} (Skipping...)")
-            continue
-
-        # Load and Merge
-        df_feat = pd.read_csv(feature_file)
-        valid_features = [f for f in FEATURES_LIST if f in df_feat.columns]
-        
-        if not valid_features:
-            print(f"⚠️  None of the configured features found in {size} CSV.")
-            continue
-
-        df = pd.merge(df_freq, df_feat, on='token_id', how='inner')
-        y = df['log_count']
-        
-        # Store raw data for retraining later
-        global_dataframes[size] = {'df': df, 'y': y, 'valid_features': valid_features}
-        global_storage[size] = {'features': valid_features}
-
-        # Train Individual Features
-        print(f"   Training individual feature models...")
-        for feat in valid_features:
-            global_storage[size][feat] = train_and_store(df[[feat]], y)
-        
-        # Train Initial Combined
-        print(f"   Training combined model...")
-        global_storage[size]['combined'] = train_and_store(df[valid_features], y)
-        global_storage[size]['active_combined_features'] = valid_features
-
-        print(f"   ✅ Done.")
-    
-    # 3. Save Cache after fresh training
-    if global_storage:
-        save_cache()
 
 
-if not global_storage:
-    print("\n❌ No models loaded. Exiting.")
-    exit()
 
-print("\n✅ Training Complete. Launching Modular Viewer...")
-
-# ==========================================
-# 3. MODULAR VISUALIZATION LOGIC
-# ==========================================
 class ModularViewer:
     def __init__(self):
         self.models = list(global_storage.keys())
@@ -396,5 +342,67 @@ class ModularViewer:
         
 
 if __name__ == "__main__":
+
+    
+
+    # 1. Try to Load from Cache First
+    if not load_cache():
+        
+        # 2. If Cache failed/missing, Load Real Data and Train
+        if os.path.exists(FREQ_FILE):
+            df_freq = pd.read_csv(FREQ_FILE)
+            print(f"✅ Frequency file loaded ({len(df_freq)} tokens)")
+        else:
+            print(f"❌ Frequency file not found at {FREQ_FILE}")
+            exit()
+
+        # Train Models Loop
+        for size in MODEL_SIZES:
+            print(f"\n--- Processing Model: {size} ---")
+            
+            feature_file = os.path.join(BASE_MODELS_FOLDER, f'MinGPT_Checkpoints_{size}', 'final_frequency_dataset.csv')
+            
+            if not os.path.exists(feature_file):
+                print(f"⚠️  Feature file not found for {size} (Skipping...)")
+                continue
+
+            # Load and Merge
+            df_feat = pd.read_csv(feature_file)
+            valid_features = [f for f in FEATURES_LIST if f in df_feat.columns]
+            
+            if not valid_features:
+                print(f"⚠️  None of the configured features found in {size} CSV.")
+                continue
+
+            df = pd.merge(df_freq, df_feat, on='token_id', how='inner')
+            y = df['log_count']
+            
+            # Store raw data for retraining later
+            global_dataframes[size] = {'df': df, 'y': y, 'valid_features': valid_features}
+            global_storage[size] = {'features': valid_features}
+
+            # Train Individual Features
+            print(f"   Training individual feature models...")
+            for feat in valid_features:
+                global_storage[size][feat] = train_and_store(df[[feat]], y)
+            
+            # Train Initial Combined
+            print(f"   Training combined model...")
+            global_storage[size]['combined'] = train_and_store(df[valid_features], y)
+            global_storage[size]['active_combined_features'] = valid_features
+
+            print(f"   ✅ Done.")
+        
+        # 3. Save Cache after fresh training
+        if global_storage:
+            save_cache()
+
+
+    if not global_storage:
+        print("\n❌ No models loaded. Exiting.")
+        exit()
+
+    print("\n✅ Training Complete. Launching Modular Viewer...")
+
     viewer = ModularViewer()
     plt.show()

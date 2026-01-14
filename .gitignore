@@ -8,3 +8,4 @@ data/
 
 venv/
 __pycache__/
+analysis_cache.pkl

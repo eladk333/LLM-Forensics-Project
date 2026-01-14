@@ -10,14 +10,15 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 from sklearn.metrics import r2_score
 import os
+import pickle
 
-# ==========================================
-# 1. CONFIGURATION & DATA LOADING
-# ==========================================
+# Paths
 MODEL_SIZES = ['7M', '30M', '124M'] 
 BASE_MODELS_FOLDER = r'G:\My Drive\llm\data\models'
 FREQ_FILE = r'G:\My Drive\llm\data\datasets\wiki\wiki_token_frequencies.csv'
+CACHE_FILE = r'analysis_cache.pkl'
 
+# Feautres
 FEATURE_CONFIG = {
     'embedding_norm': 'Embedding Norm',
     'logit_norm':     'Logit Norm',
@@ -37,6 +38,39 @@ global_storage = {}     # Stores calculated results (predictions, R2 scores)
 global_dataframes = {}  # Stores raw dataframes for retraining
 
 # --- HELPER: TRAIN FUNCTION (Now Global) ---
+
+# --- HELPER: CACHING FUNCTIONS ---
+def save_cache():
+    """Saves the current global state to a pickle file."""
+    try:
+        with open(CACHE_FILE, 'wb') as f:
+            pickle.dump({'storage': global_storage, 'dfs': global_dataframes}, f)
+        print("💾 Cache saved successfully.")
+    except Exception as e:
+        print(f"⚠️ Could not save cache: {e}")
+
+def load_cache():
+    """Loads state from pickle file if it exists and is fresh."""
+    if not os.path.exists(CACHE_FILE):
+        return False
+    
+    # Check if cache is older than the frequency file (Data changed?)
+    if os.path.exists(FREQ_FILE):
+        if os.path.getmtime(FREQ_FILE) > os.path.getmtime(CACHE_FILE):
+            print("🔄 Source data changed. Ignoring cache.")
+            return False
+
+    try:
+        with open(CACHE_FILE, 'rb') as f:
+            data = pickle.load(f)
+            global global_storage, global_dataframes
+            global_storage = data['storage']
+            global_dataframes = data['dfs']
+        print("⚡ Loaded results from cache (Skipping training).")
+        return True
+    except Exception as e:
+        print(f"⚠️ Cache found but corrupted: {e}")
+        return False
 def train_and_store(X_data, y_data):
     """
     Trains Linear and MLP models on the provided X_data and y_data.
@@ -81,52 +115,58 @@ def train_and_store(X_data, y_data):
 
 print(f"📂 Loading Data from: {BASE_MODELS_FOLDER}")
 
-# Load Frequency File
-if os.path.exists(FREQ_FILE):
-    df_freq = pd.read_csv(FREQ_FILE)
-    print(f"✅ Frequency file loaded ({len(df_freq)} tokens)")
-else:
-    print(f"❌ Frequency file not found at {FREQ_FILE}")
-    exit()
+# 1. Try to Load from Cache First
+if not load_cache():
+    
+    # 2. If Cache failed/missing, Load Real Data and Train
+    if os.path.exists(FREQ_FILE):
+        df_freq = pd.read_csv(FREQ_FILE)
+        print(f"✅ Frequency file loaded ({len(df_freq)} tokens)")
+    else:
+        print(f"❌ Frequency file not found at {FREQ_FILE}")
+        exit()
 
-# Train Models Loop
-for size in MODEL_SIZES:
-    print(f"\n--- Processing Model: {size} ---")
-    
-    feature_file = os.path.join(BASE_MODELS_FOLDER, f'MinGPT_Checkpoints_{size}', 'final_frequency_dataset.csv')
-    
-    if not os.path.exists(feature_file):
-        print(f"⚠️  Feature file not found for {size} (Skipping...)")
-        continue
+    # Train Models Loop
+    for size in MODEL_SIZES:
+        print(f"\n--- Processing Model: {size} ---")
+        
+        feature_file = os.path.join(BASE_MODELS_FOLDER, f'MinGPT_Checkpoints_{size}', 'final_frequency_dataset.csv')
+        
+        if not os.path.exists(feature_file):
+            print(f"⚠️  Feature file not found for {size} (Skipping...)")
+            continue
 
-    # Load and Merge
-    df_feat = pd.read_csv(feature_file)
-    valid_features = [f for f in FEATURES_LIST if f in df_feat.columns]
-    
-    if not valid_features:
-        print(f"⚠️  None of the configured features found in {size} CSV.")
-        continue
+        # Load and Merge
+        df_feat = pd.read_csv(feature_file)
+        valid_features = [f for f in FEATURES_LIST if f in df_feat.columns]
+        
+        if not valid_features:
+            print(f"⚠️  None of the configured features found in {size} CSV.")
+            continue
 
-    df = pd.merge(df_freq, df_feat, on='token_id', how='inner')
-    y = df['log_count']
-    
-    # Store raw data for retraining later
-    global_dataframes[size] = {'df': df, 'y': y, 'valid_features': valid_features}
-    global_storage[size] = {'features': valid_features}
+        df = pd.merge(df_freq, df_feat, on='token_id', how='inner')
+        y = df['log_count']
+        
+        # Store raw data for retraining later
+        global_dataframes[size] = {'df': df, 'y': y, 'valid_features': valid_features}
+        global_storage[size] = {'features': valid_features}
 
-    # Train Individual Features (Pre-calculate these as they are fast)
-    print(f"   Training individual feature models...")
-    for feat in valid_features:
-        global_storage[size][feat] = train_and_store(df[[feat]], y)
-    
-    # Train Initial Combined (All valid features)
-    print(f"   Training combined model...")
-    global_storage[size]['combined'] = train_and_store(df[valid_features], y)
-    
-    # Store which features were used for the current 'combined' model
-    global_storage[size]['active_combined_features'] = valid_features
+        # Train Individual Features
+        print(f"   Training individual feature models...")
+        for feat in valid_features:
+            global_storage[size][feat] = train_and_store(df[[feat]], y)
+        
+        # Train Initial Combined
+        print(f"   Training combined model...")
+        global_storage[size]['combined'] = train_and_store(df[valid_features], y)
+        global_storage[size]['active_combined_features'] = valid_features
 
-    print(f"   ✅ Done.")
+        print(f"   ✅ Done.")
+    
+    # 3. Save Cache after fresh training
+    if global_storage:
+        save_cache()
+
 
 if not global_storage:
     print("\n❌ No models loaded. Exiting.")
@@ -343,13 +383,17 @@ class ModularViewer:
             
             new_results = train_and_store(df[selected_features], y)
             
-            # 4. Update Storage
             global_storage[self.current_model]['combined'] = new_results
             global_storage[self.current_model]['active_combined_features'] = selected_features
             print(f"   ✅ Retraining Complete. R2: {new_results['mlp_r2']:.4f}")
+            
+            # --- CACHE UPDATE: Save new retraining to disk ---
+            save_cache() 
 
         # 5. Refresh Plot
         self.update()
+
+        
 
 if __name__ == "__main__":
     viewer = ModularViewer()

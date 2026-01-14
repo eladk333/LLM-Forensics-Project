@@ -223,6 +223,9 @@ class ModularViewer:
             plt.suptitle(f"Prediction Accuracy: {display_name} ({self.current_model})", fontsize=16)
 
     def update(self):
+
+        if hasattr(self, 'check'):
+            self.check = None
         self.fig.clf() 
         # Adjust layout to make room for controls on Left AND Right
         plt.subplots_adjust(left=0.25, right=0.8) 

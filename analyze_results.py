@@ -24,12 +24,12 @@ FEATURE_CONFIG = {
     'logit_norm':     'Logit Norm',
     'weight_variance': 'Weight Variance', 
     'weight_mean':     'Weight Mean',
-    'l1_norm':         'L1 Norm (New)',
-    'dist_to_center':  'Dist to Center (New)',
-    'weight_skew':     'Skewness (New)',
-    'weight_kurtosis': 'Kurtosis (New)',
-    'token_len':       'Token Length (New)',
-    'is_upper':        'Is Capitalized (New)'
+    'l1_norm':         'L1 Norm',
+    'dist_to_center':  'Dist to Center',
+    'weight_skew':     'Skewness',
+    'weight_kurtosis': 'Kurtosis',
+    'token_len':       'Token Length',
+    'is_upper':        'Is Capitalized'
 }
 FEATURES_LIST = list(FEATURE_CONFIG.keys())
 
@@ -48,7 +48,10 @@ def save_cache():
         print(f"Failed to save cache: {e}")
 
 # Checks if the prediction models were trained or we need to train.
-def load_cache():    
+def load_cache(use_cache=True):  
+
+    if not use_cache:
+        return False  
     if not os.path.exists(CACHE_FILE): # Checks if there is a cache file
         return False
     
@@ -61,6 +64,11 @@ def load_cache():
     try:
         with open(CACHE_FILE, 'rb') as f:
             data = pickle.load(f)
+
+            cached_models = list(data['storage'].keys())
+            if not all(m in cached_models for m in MODEL_SIZES):
+                return False
+            
             global global_storage, global_dataframes
             global_storage = data['storage']
             global_dataframes = data['dfs']
@@ -346,10 +354,10 @@ class ModularViewer:
 
 if __name__ == "__main__":
 
-    
+    USE_CACHE = False # If we didn't change anything and just want to load it fast
 
     # 1. Try to Load from Cache First
-    if not load_cache():
+    if not load_cache(USE_CACHE):
         
         # 2. If Cache failed/missing, Load Real Data and Train
         if os.path.exists(FREQ_FILE):

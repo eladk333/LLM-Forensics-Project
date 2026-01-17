@@ -331,7 +331,7 @@ if __name__ == "__main__":
 
         
         df_features = pd.read_csv(feature_file) # Load feature file into df
-        valid_features = [f for f in FEATURES_LIST if f in df_freq.columns] # Filter for only features we have 
+        valid_features = [f for f in FEATURES_LIST if f in df_features.columns] # Filter for only features we have 
                 
 
         df = pd.merge(df_freq, df_features, on='token_id', how='inner') # Merge the freq file with the features file

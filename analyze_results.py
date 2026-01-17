@@ -23,9 +23,9 @@ FEATURE_CONFIG = {
     'weight_variance': 'Weight Variance', 
     'weight_mean':     'Weight Mean',
     'l1_norm':         'L1 Norm',
-    'dist_to_center':  'Dist to Center',
-    'weight_skew':     'Skewness',
-    'weight_kurtosis': 'Kurtosis',
+    # 'dist_to_center':  'Dist to Center',
+    # 'weight_skew':     'Skewness (Doesnt help)',
+    # 'weight_kurtosis': 'Kurtosis (Doesnt help)',
     'token_len':       'Token Length',
     'is_upper':        'Is Capitalized'
 }
@@ -227,7 +227,7 @@ class ModularViewer:
             self.current_feature_key = current_valid_feats[0]
 
         ax_feat = plt.axes([0.02, 0.05, 0.18, 0.45], facecolor='#fff')
-        ax_feat.set_title("3. Focus Area", weight='bold')
+        ax_feat.set_title("3.Features", weight='bold')
         self.rad_feat = RadioButtons(ax_feat, labels, active=active_idx)
         self.label_to_key = dict(zip(labels, current_valid_feats))
         self.rad_feat.on_clicked(self.set_feature)

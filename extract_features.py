@@ -19,7 +19,7 @@ CONFIGS = {
 # Paths
 BASE_FOLDER = r'G:\My Drive\llm\data\models'
 MODEL_PATH = os.path.join(BASE_FOLDER, f'MinGPT_Checkpoints_{MODEL_SIZE}')
-OUTPUT_FILE = os.path.join(MODEL_PATH, 'final_frequency_dataset.csv')
+OUTPUT_FILE = os.path.join(MODEL_PATH, 'model_features.csv')
 
 
 

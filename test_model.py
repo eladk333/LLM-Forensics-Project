@@ -12,6 +12,18 @@ import threading
 # The seventh named storm, third hurricane and first major hurricane of the 1988 Atlantic hurricane season, Gilbert developed from a tropical wave on September 8 while located 400 mi east of Barbados. Following intensification into a tropical storm the next day, Gilbert steadily strengthened as it tracked west-northwestward into the
 # The kilogram is defined in terms of three defining constants: a specific atomic transition frequency, which defines the duration of the second, the speed of light in vacuum, which defines the length of the metre, and the Planck constant, which when combined with the metre and second, defines the
 # The Battle of the Bulge, also known as the Ardennes Counteroffensive, was a major German offensive campaign on the Western Front during World War II. The battle lasted from 16 December 1944 to 25 January 1945. It was launched through the densely forested Ardennes region of Wallonia in eastern Belgium, northeast France, and Luxembourg, towards the end of the
+prompt_capitals = """Beijing is the capital of China.
+Ottawa is the capital of Canada.
+Cairo is the capital of Egypt.
+Tokyo is the capital of Japan.
+Brasilia is the capital of Brazil.
+Madrid is the capital of"""
+prompt_currency = """The currency of China is the Yuan.
+The currency of India is the Rupee.
+The currency of the USA is the Dollar.
+The currency of Japan is the Yen.
+The currency of the UK is the Pound.
+The currency of France is the"""
 # --- Path Setup ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(current_dir, 'minGPT'))
@@ -59,7 +71,7 @@ class GPTPlayerApp:
         self._setup_ui()
         
         # Load default
-        self.text_area.insert("1.0", "The history of the ")
+        self.text_area.insert("1.0", "The history of the")
         self.model_selector.set('124M')
         self.load_model_thread('124M')
 
@@ -108,7 +120,7 @@ class GPTPlayerApp:
         btn_frame = ttk.Frame(left_frame)
         btn_frame.pack(fill=tk.X, pady=5)
         ttk.Button(btn_frame, text="Clear", command=self.clear_text).pack(side=tk.LEFT)
-        self.add_btn = ttk.Button(btn_frame, text="Generate Next Token (Tab)", command=self.add_sampled_prediction)
+        self.add_btn = ttk.Button(btn_frame, text="Generate Next Token", command=self.add_sampled_prediction)
         self.add_btn.pack(side=tk.RIGHT)
         self.root.bind("<Tab>", lambda e: self.add_sampled_prediction()) 
 

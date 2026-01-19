@@ -8,26 +8,51 @@ from sklearn.metrics import mean_absolute_error, r2_score
 import os
 
 # ==========================================
-# 1. SETUP
+# 1. CONFIGURATION & DATA LOADING
 # ==========================================
-INPUT_CSV = 'gradient_norm_results.csv'
-OUTPUT_IMG_DIR = 'plots'
+MY_DRIVE_BASE = r"G:/My Drive"
+PROJECT_FOLDER = "LLM_erez_property"
+
+INPUT_CSV = os.path.join(MY_DRIVE_BASE, PROJECT_FOLDER, "gradient_norm_results.csv")
+OUTPUT_IMG_DIR = os.path.join(MY_DRIVE_BASE, PROJECT_FOLDER, "plots")
+
 os.makedirs(OUTPUT_IMG_DIR, exist_ok=True)
 
 if not os.path.exists(INPUT_CSV):
-    print(f"❌ Error: {INPUT_CSV} not found. Run extract_gradient_norms.py first.")
+    print(f"❌ Error: {INPUT_CSV} not found. Please run 'extract_gradient_norms.py' first.")
     exit()
 
+print(f"📂 Loading data from {INPUT_CSV}...")
 df = pd.read_csv(INPUT_CSV)
 model_names = df['Model'].unique()
 
-print("🤖 TRAINING PREDICTION MODELS (Norm -> Steps)...")
-print("=" * 60)
+# ==========================================
+# 2. GENERATE COMBINED GRAPH (ALL MODELS)
+# ==========================================
+print("\n📊 Generating Combined Correlation Graph...")
+plt.figure(figsize=(12, 8))
+
+for model_name in model_names:
+    subset = df[df['Model'] == model_name].sort_values('Step')
+    if not subset.empty:
+        plt.plot(subset['Step'], subset['Embedding_Norm'], marker='o', linestyle='-', label=model_name, markersize=4)
+
+plt.title("Correlation: Training Steps vs. Embedding Norm (All Models)")
+plt.xlabel("Gradient Updates (Training Steps)")
+plt.ylabel("Embedding Matrix Norm (L2)")
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend()
+
+combined_plot_path = os.path.join(OUTPUT_IMG_DIR, "combined_correlation_plot.png")
+plt.savefig(combined_plot_path)
+plt.close()
+print(f"   📷 Combined plot saved to: {combined_plot_path}")
 
 # ==========================================
-# 2. TRAIN & PLOT LOOP
+# 3. TRAIN PREDICTORS & PLOT INDIVIDUAL GRAPHS
 # ==========================================
-plt.figure(figsize=(12, 8)) # Setup for combined plot
+print("\n🤖 Training Prediction Models & Generating Individual Plots...")
+print("=" * 60)
 
 for model_name in model_names:
     print(f"\n📌 Analyzing: {model_name}")
@@ -38,7 +63,11 @@ for model_name in model_names:
     X = model_data[['Embedding_Norm']].values
     y = model_data['Step'].values
 
-    # Train/Test Split
+    if len(X) < 5:
+        print(f"   ⚠️ Not enough data points ({len(X)}). Skipping.")
+        continue
+
+    # Split Data
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     # Polynomial Regression (Degree 2)
@@ -51,8 +80,6 @@ for model_name in model_names:
 
     # Predict
     y_pred = regressor.predict(X_test_poly)
-
-    # Evaluate
     mae = mean_absolute_error(y_test, y_pred)
     r2 = r2_score(y_test, y_pred)
 
@@ -60,10 +87,10 @@ for model_name in model_names:
     print(f"   📉 MAE: +/- {mae:.1f} Steps")
 
     # --- INDIVIDUAL PLOT ---
-    plt.clf() # Clear figure
+    plt.figure(figsize=(10, 6))
     plt.scatter(X, y, color='blue', label='Actual Data', alpha=0.6)
     
-    # Smooth line for visualization
+    # Smooth line
     X_range = np.linspace(X.min(), X.max(), 100).reshape(-1, 1)
     X_range_poly = poly.transform(X_range)
     y_range_pred = regressor.predict(X_range_poly)
@@ -76,8 +103,11 @@ for model_name in model_names:
     plt.legend()
     plt.grid(True, alpha=0.3)
     
-    save_path = os.path.join(OUTPUT_IMG_DIR, f"prediction_{model_name.replace(' ', '_')}.png")
+    # Save Plot
+    safe_name = model_name.replace(" ", "_")
+    save_path = os.path.join(OUTPUT_IMG_DIR, f"prediction_{safe_name}.png")
     plt.savefig(save_path)
-    print(f"   📷 Plot saved to: {save_path}")
+    plt.close() 
+    print(f"   📷 Individual plot saved to: {save_path}")
 
-print("\n✅ Analysis Complete.")
+print(f"\n✅ DONE! All graphs saved in: {OUTPUT_IMG_DIR}")

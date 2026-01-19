@@ -8,18 +8,17 @@ from sklearn.metrics import mean_absolute_error, r2_score
 import os
 
 # ==========================================
-# 1. CONFIGURATION & DATA LOADING
+# 1. CONFIGURATION
 # ==========================================
 MY_DRIVE_BASE = r"G:/My Drive"
 PROJECT_FOLDER = "LLM_erez_property"
-
 INPUT_CSV = os.path.join(MY_DRIVE_BASE, PROJECT_FOLDER, "gradient_norm_results.csv")
 OUTPUT_IMG_DIR = os.path.join(MY_DRIVE_BASE, PROJECT_FOLDER, "plots")
 
 os.makedirs(OUTPUT_IMG_DIR, exist_ok=True)
 
 if not os.path.exists(INPUT_CSV):
-    print(f"❌ Error: {INPUT_CSV} not found. Please run 'extract_gradient_norms.py' first.")
+    print(f"❌ Error: {INPUT_CSV} not found. Run extract_gradient_norms.py first.")
     exit()
 
 print(f"📂 Loading data from {INPUT_CSV}...")
@@ -27,55 +26,41 @@ df = pd.read_csv(INPUT_CSV)
 model_names = df['Model'].unique()
 
 # ==========================================
-# 2. GENERATE COMBINED GRAPH (Step on X-Axis)
+# 2. GENERATE COMBINED GRAPH (X=Norm, Y=Steps)
 # ==========================================
-print("\n📊 Generating Combined Correlation Graph...")
+print("\n📊 Generating Combined Graph...")
 plt.figure(figsize=(12, 8))
 
 for model_name in model_names:
-    subset = df[df['Model'] == model_name].sort_values('Step')
+    subset = df[df['Model'] == model_name].sort_values('Embedding_Norm')
     if not subset.empty:
-        plt.plot(subset['Step'], subset['Embedding_Norm'], marker='o', linestyle='-', label=model_name, markersize=4)
-        
-        # --- ANNOTATE "FULL EPOCH" ---
-        last_step = subset['Step'].iloc[-1]
-        last_norm = subset['Embedding_Norm'].iloc[-1]
-        
-        plt.annotate('Full Epoch', 
-                        xy=(last_step, last_norm), 
-                        xytext=(0, 15), 
-                        textcoords='offset points',
-                        ha='center', fontsize=9, fontweight='bold',
-                        arrowprops=dict(facecolor='black', arrowstyle='->', alpha=0.7))
+        plt.plot(subset['Embedding_Norm'], subset['Step'], marker='o', linestyle='-', label=model_name, markersize=4)
 
-plt.title("Training Dynamics: Embedding Norm vs. Gradient Updates")
-plt.xlabel("Gradient Updates (Training Steps) [X]")
-plt.ylabel("Embedding Matrix Norm (L2) [Y]")
+plt.title("The Forensic Tool: Predicting Model Age from Embedding Norm")
+plt.xlabel("Embedding Matrix Norm (L2) [Input]")
+plt.ylabel("Gradient Updates (Training Steps) [Target]")
 plt.grid(True, linestyle='--', alpha=0.6)
 plt.legend()
-
-combined_plot_path = os.path.join(OUTPUT_IMG_DIR, "combined_correlation_plot.png")
-plt.savefig(combined_plot_path)
+plt.savefig(os.path.join(OUTPUT_IMG_DIR, "combined_correlation_plot.png"))
 plt.close()
-print(f"   📷 Combined plot saved to: {combined_plot_path}")
+print(f"   📷 Combined plot saved.")
 
 # ==========================================
-# 3. TRAIN PREDICTORS (Step -> Norm)
+# 3. TRAIN PREDICTORS (Norm -> Steps)
 # ==========================================
-print("\n🤖 Training Prediction Models (X=Step, Y=Norm)...")
+print("\n🤖 Training Forensic Models (Input: Norm -> Output: Steps)...")
 print("=" * 60)
 
 for model_name in model_names:
     print(f"\n📌 Analyzing: {model_name}")
 
-    model_data = df[df['Model'] == model_name].sort_values('Step')
+    model_data = df[df['Model'] == model_name].sort_values('Embedding_Norm')
     
-    # X=Step, Y=Norm
-    X = model_data[['Step']].values           
-    y = model_data['Embedding_Norm'].values   
+    # CORRECT LOGIC: Predict STEPS (y) from NORM (X)
+    X = model_data[['Embedding_Norm']].values 
+    y = model_data['Step'].values             
 
     if len(X) < 5:
-        print(f"   ⚠️ Not enough data points ({len(X)}). Skipping.")
         continue
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
@@ -92,9 +77,9 @@ for model_name in model_names:
     r2 = r2_score(y_test, y_pred)
 
     print(f"   ✅ R² Score: {r2:.5f}")
-    print(f"   📉 MAE: +/- {mae:.4f} Norm Value")
+    print(f"   📉 MAE: +/- {mae:.1f} Steps")
 
-    # --- INDIVIDUAL PLOT ---
+    # --- PLOT INDIVIDUAL PREDICTION ---
     plt.figure(figsize=(10, 6))
     
     plt.scatter(X, y, color='blue', label='Actual Data', alpha=0.6)
@@ -103,29 +88,29 @@ for model_name in model_names:
     X_range_poly = poly.transform(X_range)
     y_range_pred = regressor.predict(X_range_poly)
     
-    plt.plot(X_range, y_range_pred, color='red', linewidth=2, label='Prediction (Poly Deg 2)')
+    plt.plot(X_range, y_range_pred, color='red', linewidth=2, label='Prediction Model')
     
-    # --- ANNOTATE "FULL EPOCH" ---
+    # Annotate Full Epoch
     last_x = X.max()
-    last_y = y[np.argmax(X)] 
-    
-    plt.annotate('Full Epoch', 
-                    xy=(last_x, last_y), 
-                    xytext=(0, 20),
-                    textcoords='offset points',
-                    ha='center', fontsize=10, fontweight='bold',
-                    arrowprops=dict(facecolor='black', arrowstyle='->'))
+    last_y = y[np.argmax(X)]
+    plt.annotate('Full Epoch', xy=(last_x, last_y), xytext=(-20, 10), 
+                 textcoords='offset points', ha='right', fontsize=10, fontweight='bold',
+                 arrowprops=dict(facecolor='black', arrowstyle='->'))
 
-    plt.title(f"Training Dynamics: {model_name}\nR2: {r2:.4f}")
-    plt.xlabel("Gradient Updates (Training Steps) [X]")
-    plt.ylabel("Embedding Norm (L2) [Y]")
-    plt.legend()
+    stats_text = f"Forensic Accuracy:\n$R^2$ = {r2:.4f}\nMAE = {mae:.1f} Steps"
+    plt.gca().text(0.05, 0.95, stats_text, transform=plt.gca().transAxes,
+                   fontsize=10, verticalalignment='top', 
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+
+    plt.title(f"Forensic Model: {model_name}")
+    plt.xlabel("Embedding Norm (L2) [Input]")
+    plt.ylabel("Predicted Steps [Output]")
+    plt.legend(loc='lower right')
     plt.grid(True, alpha=0.3)
     
-    safe_name = model_name.replace(" ", "_")
-    save_path = os.path.join(OUTPUT_IMG_DIR, f"prediction_{safe_name}.png")
+    save_path = os.path.join(OUTPUT_IMG_DIR, f"prediction_{model_name.replace(' ', '_')}.png")
     plt.savefig(save_path)
     plt.close() 
-    print(f"   📷 Individual plot saved to: {save_path}")
+    print(f"   📷 Plot saved: {save_path}")
 
-print(f"\n✅ DONE! All graphs updated in: {OUTPUT_IMG_DIR}")
+print(f"\n✅ DONE! All graphs and stats are aligned (X=Norm, Y=Steps).")

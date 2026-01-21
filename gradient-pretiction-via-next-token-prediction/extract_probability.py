@@ -10,24 +10,29 @@ from torch.utils.data import Dataset, DataLoader
 # ==========================================
 # 1. SERVER CONFIGURATION
 # ==========================================
-BASE_PATH = "G:/My Drive/LLM_erez_property/" 
-DATA_CACHE_PATH = os.path.join(BASE_PATH, "Data/wiki", "wiki_103_full_cache.pt")
+BASE_PATH = os.getcwd() 
 
+# Path structure based on your friend's code
+DATA_CACHE_PATH = os.path.join(BASE_PATH, "data", "wiki", "wiki_103_full_cache.pt")
+CHECKPOINT_BASE_DIR = os.path.join(BASE_PATH, "data", "models")
+
+# Add minGPT to path
 sys.path.append(os.path.join(BASE_PATH, 'minGPT'))
 
 try:
     from mingpt.model import GPT
     from mingpt.utils import set_seed
 except ImportError:
-    print("❌ Error: minGPT not found.")
+    print("❌ Error: minGPT not found. Ensure 'minGPT' folder is in current directory.")
     sys.exit(1)
 
-# Fixed seed ensures the "Random Shuffle" is exactly the same every time we run the script
 set_seed(3407)
 
+# Model Architectures
 CONFIGS = {
     '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768},
     '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384},
+    # 7M is commented out to save resources (running on Colab)
     # '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128}, 
 }
 
@@ -43,11 +48,11 @@ class WikiDataset(Dataset):
     def __init__(self, cache_path, block_size=128):
         self.block_size = block_size
         if os.path.exists(cache_path):
-            print(f"🚀 Loading tokens from cache: {cache_path}")
+            print(f"🚀 Loading tokens from: {cache_path}")
             self.tokens = torch.load(cache_path)
             if not isinstance(self.tokens, torch.Tensor):
                 self.tokens = torch.tensor(self.tokens, dtype=torch.long)
-            print(f"✅ Loaded {len(self.tokens):,} tokens into memory.")
+            print(f"✅ Loaded {len(self.tokens):,} tokens.")
         else:
             print(f"❌ Error: Cache not found at {cache_path}")
             self.tokens = torch.empty(0, dtype=torch.long)
@@ -63,38 +68,30 @@ class WikiDataset(Dataset):
         return x, y
 
 # ==========================================
-# 3. CORE LOGIC
+# 3. LOGIC & SMART DETECTION
 # ==========================================
 def get_fixed_batches(loader, max_batches):
-    """
-    Extracts a FIXED list of batches from the loader.
-    This ensures every model/checkpoint sees exactly the same data.
-    """
-    print(f"🔒 Freezing {max_batches} batches for consistent evaluation...")
+    """ Locks a specific set of batches for consistent evaluation """
+    print(f"🔒 Freezing {max_batches} batches...")
     fixed_data = []
     iterator = iter(loader)
     try:
         for _ in range(max_batches):
-            batch = next(iterator)
-            fixed_data.append(batch)
+            fixed_data.append(next(iterator))
     except StopIteration:
         pass
-    print(f"✅ Locked {len(fixed_data)} batches in memory.")
+    print(f"✅ Locked {len(fixed_data)} batches in RAM.")
     return fixed_data
 
 def calculate_stats_on_fixed_data(model, fixed_batches, device):
-    """
-    Runs inference on the pre-loaded fixed batches.
-    """
+    """ Inference on the fixed set """
     model.eval()
     all_probs = []
     
     with torch.no_grad():
         with torch.cuda.amp.autocast(enabled=(device == 'cuda')):
-            # Iterate over the LIST of batches, not the loader
             for x, y in fixed_batches:
                 x, y = x.to(device), y.to(device)
-                
                 logits, _ = model(x)
                 probs = F.softmax(logits, dim=-1)
                 
@@ -102,17 +99,50 @@ def calculate_stats_on_fixed_data(model, fixed_batches, device):
                 correct_probs = probs.gather(-1, y_expanded).squeeze(-1)
                 all_probs.append(correct_probs.mean().item())
             
-    if len(all_probs) == 0: return 0.0
+    if not all_probs: return 0.0
     return np.mean(all_probs)
 
-def get_step_number(filepath):
-    try:
-        filename = os.path.basename(filepath)
-        parts = filename.replace('.pt', '').split('_')
-        for part in parts:
-            if part.isdigit(): return int(part)
-        return -1
-    except: return -1
+def get_all_checkpoints_smart(folder_path):
+    """
+    Scans folder for numbered checkpoints AND 'final_model'.
+    Automatically assigns the 'final_model' to the end of the list.
+    """
+    all_files = glob.glob(os.path.join(folder_path, "*.pt"))
+    numbered = []
+    final_file = None
+    
+    for f in all_files:
+        fname = os.path.basename(f)
+        
+        # Check for Final Model
+        if "final_model" in fname or "full_epoch" in fname:
+            final_file = f
+            continue
+            
+        # Check for Numbered Steps
+        parts = fname.replace('.pt', '').split('_')
+        for p in parts:
+            if p.isdigit():
+                # Critical Fix: Ignore '1' from '1_epoch' string
+                if p == '1' and 'epoch' in fname: continue
+                numbered.append((int(p), f))
+                break
+    
+    # Sort numbered checkpoints
+    numbered.sort(key=lambda x: x[0])
+    
+    # Append Final Model at the end (Max Step + 500)
+    if final_file:
+        if numbered:
+            max_step = numbered[-1][0]
+            simulated_step = max_step + 500
+        else:
+            simulated_step = 500
+            
+        print(f"ℹ️  Identified Final Model: {os.path.basename(final_file)} -> Step {simulated_step}")
+        numbered.append((simulated_step, final_file))
+        
+    return numbered
 
 # ==========================================
 # 4. MAIN EXECUTION
@@ -120,25 +150,35 @@ def get_step_number(filepath):
 def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"🖥️  Running Experiment on: {device}")
+    print(f"📂 Working Directory: {BASE_PATH}")
     
     # 1. Initialize Dataset & Loader
     dataset = WikiDataset(DATA_CACHE_PATH, block_size=BLOCK_SIZE)
     if len(dataset) == 0: return
 
-    # Shuffle is TRUE here, but we will run it ONCE to get the fixed batches
     loader = DataLoader(dataset, shuffle=True, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, pin_memory=True)
     
-    # 2. FREEZE THE DATA (The Critical Step)
+    # 2. FREEZE DATA
     fixed_batches = get_fixed_batches(loader, MAX_BATCHES)
     
     all_results = []
 
     # 3. Iterate Models
     for model_size, conf in CONFIGS.items():
-        print(f"\n{'='*40}\n🔎 Model: {model_size}\n{'='*40}")
+        print(f"\n{'='*40}\n🔎 Processing: {model_size}\n{'='*40}")
         
-        ckpt_folder = os.path.join(BASE_PATH, f"MinGPT_Checkpoints_{model_size}")
-        if not os.path.exists(ckpt_folder): continue
+        # Path logic matching server structure
+        ckpt_folder = os.path.join(CHECKPOINT_BASE_DIR, model_size)
+        
+        if not os.path.exists(ckpt_folder):
+            print(f"⚠️  Folder not found at: {ckpt_folder}")
+            # Optional: Fallback to old naming just in case
+            alt_path = os.path.join(BASE_PATH, f"MinGPT_Checkpoints_{model_size}")
+            if os.path.exists(alt_path):
+                print(f"   -> Found alternative: {alt_path}")
+                ckpt_folder = alt_path
+            else:
+                continue
 
         # Init Model
         model_config = GPT.get_default_config()
@@ -148,37 +188,34 @@ def main():
         model_config.n_embd = conf['n_embd']
         model_config.vocab_size = 50257
         model_config.block_size = BLOCK_SIZE
-        
         model = GPT(model_config).to(device)
 
-        # Checkpoints
-        files = glob.glob(os.path.join(ckpt_folder, "*.pt"))
-        valid_ckpts = sorted([f for f in files if get_step_number(f) >= 0], key=get_step_number)
-        
-        print(f"ℹ️  Found {len(valid_ckpts)} checkpoints.")
+        # GET SMART CHECKPOINTS
+        valid_ckpts = get_all_checkpoints_smart(ckpt_folder)
+        print(f"ℹ️  Found {len(valid_ckpts)} checkpoints to analyze.")
 
-        for ckpt_path in valid_ckpts:
-            step = get_step_number(ckpt_path)
+        for step, ckpt_path in valid_ckpts:
             try:
                 state_dict = torch.load(ckpt_path, map_location=device)
                 model.load_state_dict(state_dict)
                 
                 print(f"   ⏳ Analyzing Step {step}...", end="\r")
                 
-                # USE FIXED DATA
                 avg_prob = calculate_stats_on_fixed_data(model, fixed_batches, device)
                 
                 print(f"   ✅ Step {step}: Avg Confidence = {avg_prob:.5f}")
+                
                 all_results.append({"Model": f"Model {model_size}", "Step": step, "Avg_Probability": avg_prob})
                 
             except Exception as e:
                 print(f"\n   ❌ Error: {e}")
 
-    # Save
-    if len(all_results) > 0:
+    # Save Results
+    if all_results:
         df = pd.DataFrame(all_results)
-        df.to_csv(os.path.join(BASE_PATH, "probability_results_server.csv"), index=False)
-        print("\n🎉 Done!")
+        output_path = os.path.join(BASE_PATH, "probability_results_server.csv")
+        df.to_csv(output_path, index=False)
+        print(f"\n🎉 Saved results to: {output_path}")
 
 if __name__ == "__main__":
     main()

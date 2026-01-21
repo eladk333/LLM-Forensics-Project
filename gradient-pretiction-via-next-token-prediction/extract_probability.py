@@ -31,7 +31,7 @@ set_seed(3407)
 CONFIGS = {
     '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768},
     '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384},
-    '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128},
+    # '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128}, # Commented out to save time (running on Colab)
 }
 
 # Hyperparameters for the Server Run
@@ -68,7 +68,6 @@ class WikiDataset(Dataset):
             self.tokens = torch.empty(0, dtype=torch.long)
 
     def __len__(self):
-        # OPTIMIZATION REMOVED: We no longer limit to 50,000.
         # We expose the FULL dataset length. Control is done via MAX_BATCHES in the loop.
         if len(self.tokens) == 0:
             return 0

@@ -13,7 +13,7 @@ from torch.utils.data import Dataset, DataLoader
 BASE_PATH = os.getcwd() 
 
 # Path structure based on your friend's code
-DATA_CACHE_PATH = os.path.join(BASE_PATH, "data", "wiki", "wiki_103_full_cache.pt")
+DATA_CACHE_PATH = os.path.join(BASE_PATH, "Data", "wiki", "wiki_103_full_cache.pt")
 CHECKPOINT_BASE_DIR = os.path.join(BASE_PATH, "data", "models")
 
 # Add minGPT

@@ -16,24 +16,22 @@ BASE_PATH = os.getcwd()
 DATA_CACHE_PATH = os.path.join(BASE_PATH, "data", "wiki", "wiki_103_full_cache.pt")
 CHECKPOINT_BASE_DIR = os.path.join(BASE_PATH, "data", "models")
 
-# Add minGPT to path
+# Add minGPT
 sys.path.append(os.path.join(BASE_PATH, 'minGPT'))
 
 try:
     from mingpt.model import GPT
     from mingpt.utils import set_seed
 except ImportError:
-    print("❌ Error: minGPT not found. Ensure 'minGPT' folder is in current directory.")
+    print("❌ Error: minGPT not found.")
     sys.exit(1)
 
 set_seed(3407)
 
-# Model Architectures
 CONFIGS = {
     '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768},
     '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384},
-    # 7M is commented out to save resources (running on Colab)
-    # '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128}, 
+    # '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128}, # Commented out (Colab)
 }
 
 BATCH_SIZE = 64      
@@ -42,7 +40,7 @@ MAX_BATCHES = 200
 NUM_WORKERS = 4      
 
 # ==========================================
-# 2. DATASET CLASS
+# 2. DATASET
 # ==========================================
 class WikiDataset(Dataset):
     def __init__(self, cache_path, block_size=128):
@@ -68,10 +66,9 @@ class WikiDataset(Dataset):
         return x, y
 
 # ==========================================
-# 3. LOGIC & SMART DETECTION
+# 3. LOGIC (FIXED BATCHES + SMART CHECKPOINTS)
 # ==========================================
 def get_fixed_batches(loader, max_batches):
-    """ Locks a specific set of batches for consistent evaluation """
     print(f"🔒 Freezing {max_batches} batches...")
     fixed_data = []
     iterator = iter(loader)
@@ -84,28 +81,24 @@ def get_fixed_batches(loader, max_batches):
     return fixed_data
 
 def calculate_stats_on_fixed_data(model, fixed_batches, device):
-    """ Inference on the fixed set """
     model.eval()
     all_probs = []
-    
     with torch.no_grad():
         with torch.cuda.amp.autocast(enabled=(device == 'cuda')):
             for x, y in fixed_batches:
                 x, y = x.to(device), y.to(device)
                 logits, _ = model(x)
                 probs = F.softmax(logits, dim=-1)
-                
                 y_expanded = y.unsqueeze(-1)
                 correct_probs = probs.gather(-1, y_expanded).squeeze(-1)
                 all_probs.append(correct_probs.mean().item())
-            
     if not all_probs: return 0.0
     return np.mean(all_probs)
 
 def get_all_checkpoints_smart(folder_path):
     """
-    Scans folder for numbered checkpoints AND 'final_model'.
-    Automatically assigns the 'final_model' to the end of the list.
+    CRITICAL FIX: Handles 'final_model_1_epoch.pt' correctly.
+    Ignores the '1' in '1_epoch' and places final model at the end.
     """
     all_files = glob.glob(os.path.join(folder_path, "*.pt"))
     numbered = []
@@ -123,15 +116,14 @@ def get_all_checkpoints_smart(folder_path):
         parts = fname.replace('.pt', '').split('_')
         for p in parts:
             if p.isdigit():
-                # Critical Fix: Ignore '1' from '1_epoch' string
+                # FIX: Ignore '1' if it comes from '1_epoch'
                 if p == '1' and 'epoch' in fname: continue
                 numbered.append((int(p), f))
                 break
     
-    # Sort numbered checkpoints
     numbered.sort(key=lambda x: x[0])
     
-    # Append Final Model at the end (Max Step + 500)
+    # Assign Final Model to (Max Step + 500)
     if final_file:
         if numbered:
             max_step = numbered[-1][0]
@@ -150,29 +142,23 @@ def get_all_checkpoints_smart(folder_path):
 def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"🖥️  Running Experiment on: {device}")
-    print(f"📂 Working Directory: {BASE_PATH}")
     
-    # 1. Initialize Dataset & Loader
     dataset = WikiDataset(DATA_CACHE_PATH, block_size=BLOCK_SIZE)
     if len(dataset) == 0: return
 
     loader = DataLoader(dataset, shuffle=True, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, pin_memory=True)
-    
-    # 2. FREEZE DATA
     fixed_batches = get_fixed_batches(loader, MAX_BATCHES)
     
     all_results = []
 
-    # 3. Iterate Models
     for model_size, conf in CONFIGS.items():
         print(f"\n{'='*40}\n🔎 Processing: {model_size}\n{'='*40}")
         
-        # Path logic matching server structure
         ckpt_folder = os.path.join(CHECKPOINT_BASE_DIR, model_size)
         
         if not os.path.exists(ckpt_folder):
             print(f"⚠️  Folder not found at: {ckpt_folder}")
-            # Optional: Fallback to old naming just in case
+            # Optional fallback
             alt_path = os.path.join(BASE_PATH, f"MinGPT_Checkpoints_{model_size}")
             if os.path.exists(alt_path):
                 print(f"   -> Found alternative: {alt_path}")
@@ -190,7 +176,7 @@ def main():
         model_config.block_size = BLOCK_SIZE
         model = GPT(model_config).to(device)
 
-        # GET SMART CHECKPOINTS
+        # USE SMART DETECTION HERE
         valid_ckpts = get_all_checkpoints_smart(ckpt_folder)
         print(f"ℹ️  Found {len(valid_ckpts)} checkpoints to analyze.")
 
@@ -200,22 +186,18 @@ def main():
                 model.load_state_dict(state_dict)
                 
                 print(f"   ⏳ Analyzing Step {step}...", end="\r")
-                
                 avg_prob = calculate_stats_on_fixed_data(model, fixed_batches, device)
-                
                 print(f"   ✅ Step {step}: Avg Confidence = {avg_prob:.5f}")
                 
                 all_results.append({"Model": f"Model {model_size}", "Step": step, "Avg_Probability": avg_prob})
-                
             except Exception as e:
                 print(f"\n   ❌ Error: {e}")
 
-    # Save Results
     if all_results:
         df = pd.DataFrame(all_results)
-        output_path = os.path.join(BASE_PATH, "probability_results_server.csv")
-        df.to_csv(output_path, index=False)
-        print(f"\n🎉 Saved results to: {output_path}")
+        output_csv = os.path.join(BASE_PATH, "probability_results_server.csv")
+        df.to_csv(output_csv, index=False)
+        print(f"\n🎉 Saved results to: {output_csv}")
 
 if __name__ == "__main__":
     main()

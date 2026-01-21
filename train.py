@@ -18,10 +18,18 @@ from mingpt.utils import set_seed
 set_seed(3407)
 
 # Model settings
-N_LAYER = 6   # Layers
-N_HEAD  = 6   # Attention heads
-N_EMBD  = 384  # Embedding Dimension
+N_LAYER = 12   # Increased from 6
+N_HEAD  = 12   # Increased from 6
+N_EMBD  = 768  # Increased from 384
 BATCH_SIZE = 32 # Same for all models
+
+
+# N_LAYER = 6   # Layers
+# N_HEAD  = 6   # Attention heads
+# N_EMBD  = 384  # Embedding Dimension
+
+
+
 
 # # Model settings
 # N_LAYER = 4   # Layers
@@ -29,8 +37,8 @@ BATCH_SIZE = 32 # Same for all models
 # N_EMBD  = 128  # Embedding Dimensio
 
 # Paths
-CHECKPOINT_FOLDER_PATH = 'G:/My Drive/llm//MinGPT_Checkpoints_7M_final' # Path for the model checkpoints
-DATA_CACHE_PATH = 'G:/My Drive/llm' # Path for the dataset
+CHECKPOINT_FOLDER_PATH = os.path.join(os.getcwd(), 'data', 'models', '124M') # Path for the model checkpoints
+DATA_CACHE_PATH = os.path.join(os.getcwd(), 'data', 'datasets') # Path for the dataset
 os.makedirs(CHECKPOINT_FOLDER_PATH, exist_ok=True) # If the model folder doesn't exist it creates it
 
 # The dataset class

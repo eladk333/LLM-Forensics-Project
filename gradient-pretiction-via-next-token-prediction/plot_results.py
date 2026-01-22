@@ -8,10 +8,15 @@ from sklearn.metrics import r2_score
 # ==========================================
 # CONFIGURATION
 # ==========================================
-# Uses the current working directory (Server compatible)
 BASE_PATH = os.getcwd() 
 CSV_PATH = os.path.join(BASE_PATH, "probability_results_server.csv")
-OUTPUT_IMAGE = os.path.join(BASE_PATH, "final_graph_server.png")
+
+# ==========================================
+# HELPER FUNCTION
+# ==========================================
+def log_func(x, a, b): 
+    """ Logarithmic function for curve fitting: y = a + b * ln(x) """
+    return a + b * np.log(x)
 
 # ==========================================
 # PLOTTING LOGIC
@@ -38,9 +43,6 @@ def plot_graph():
     # Sort data for clean plotting
     df = df.sort_values(by=["Model", "Step"])
     
-    # 3. Setup Plot
-    plt.figure(figsize=(12, 7))
-    
     # Define colors for consistency
     colors = {
         'Model 124M': 'blue', 
@@ -51,12 +53,14 @@ def plot_graph():
     models = df['Model'].unique()
     print(f"📊 Found data for models: {models}")
 
-    # 4. Iterate over each model to plot
+    # 3. Iterate over each model to create SEPARATE graphs
     for model_name in models:
         subset = df[df['Model'] == model_name]
         
         if subset.empty:
             continue
+
+        print(f"🎨 Generating graph for: {model_name}...")
 
         steps = subset["Step"].values
         probs = subset["Avg_Probability"].values
@@ -64,39 +68,61 @@ def plot_graph():
         # Get color (default to black if unknown)
         c = colors.get(model_name, 'black')
         
-        # A. Plot Raw Data Points
-        plt.scatter(steps, probs, color=c, alpha=0.6, label=f'{model_name} (Observed)')
+        # --- Start New Figure ---
+        plt.figure(figsize=(10, 6))
         
-        # B. Regression: Fit Logarithmic Curve
-        # Hypothesis: Probability grows logarithmically: y = a + b * ln(x)
+        # A. Plot Raw Data Points
+        plt.scatter(steps, probs, color=c, alpha=0.6, label='Observed Data')
+        
+        # B. Mark the "Full Epoch" (Last Point)
+        last_step = steps[-1]
+        last_prob = probs[-1]
+        
+        # Add annotation with arrow
+        plt.annotate('Full Epoch', 
+                     xy=(last_step, last_prob), 
+                     xytext=(-60, 30),            
+                     textcoords='offset points',  
+                     arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=8),
+                     fontsize=10, fontweight='bold', color='black',
+                     bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="black", alpha=0.8))
+
+        # C. Regression: Fit Logarithmic Curve
         try:
-            def log_func(x, a, b): 
-                return a + b * np.log(x)
-            
             popt, _ = curve_fit(log_func, steps, probs)
             probs_pred = log_func(steps, *popt)
             r2 = r2_score(probs, probs_pred)
             
-            # Only draw the line if the fit is decent (R^2 > 0.5)
-            if r2 > 0.5:
-                plt.plot(steps, probs_pred, color=c, linestyle='--', linewidth=2, 
-                         label=f'{model_name} Log Fit (R²={r2:.2f})')
-            else:
-                print(f"   ⚠️ Weak correlation for {model_name} (R²={r2:.2f}), skipping trendline.")
-                
+            # Create a label with the R^2 score
+            label_fit = f'Logarithmic Fit (R²={r2:.3f})'
+            
+            # Plot the trendline
+            plt.plot(steps, probs_pred, color='black', linestyle='--', linewidth=2, label=label_fit)
+            
+            # Optional: Add the equation text to the plot
+            equation_text = f'y = {popt[0]:.2f} + {popt[1]:.4f}ln(x)'
+            plt.title(f"{model_name}\nEquation: {equation_text}", fontsize=14)
+            
         except Exception as e:
             print(f"   ⚠️ Could not fit curve for {model_name}: {e}")
+            plt.title(f"{model_name} (Raw Data)", fontsize=14)
 
-    # 5. Graph Styling
-    plt.title("LLM Confidence Growth (True Token Probability)", fontsize=16)
-    plt.xlabel("Gradient Updates (Training Steps)", fontsize=12)
-    plt.ylabel("Average Confidence (Probability)", fontsize=12)
-    plt.grid(True, linestyle='--', alpha=0.5)
-    plt.legend(fontsize=10)
-    
-    # 6. Save Output (Server-friendly, no GUI required)
-    plt.savefig(OUTPUT_IMAGE, dpi=300, bbox_inches='tight')
-    print(f"\n✅ Success! Graph saved to: {OUTPUT_IMAGE}")
+        # Graph Styling
+        plt.xlabel("Gradient Updates (Training Steps)", fontsize=12)
+        plt.ylabel("Next Token Probability", fontsize=12)
+        plt.grid(True, linestyle='--', alpha=0.5)
+        plt.legend()
+        
+        # Save Output (Unique filename per model)
+        safe_filename = f"graph_{model_name.replace(' ', '_')}.png"
+        output_path = os.path.join(BASE_PATH, safe_filename)
+        
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close() # Close the figure to free memory
+        
+        print(f"   ✅ Saved: {output_path}")
+
+    print("\n🎉 All graphs generated successfully.")
 
 if __name__ == "__main__":
     plot_graph()

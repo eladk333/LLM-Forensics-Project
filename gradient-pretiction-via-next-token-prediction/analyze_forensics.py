@@ -2,82 +2,88 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.linear_model import LinearRegression
+from sklearn.neural_network import MLPRegressor
+from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import PolynomialFeatures, StandardScaler
 from sklearn.metrics import r2_score
 import os
 
 # CONFIG
-BASE_PATH = os.getcwd()
-INPUT_CSV = os.path.join(BASE_PATH, "forensic_merged_features.csv")
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+INPUT_CSV = os.path.join(CURRENT_DIR, "forensic_merged_features.csv")
+OUTPUT_TABLE_IMG = os.path.join(CURRENT_DIR, "r2_comparison_table.png")
+OUTPUT_COMBINED_IMG = os.path.join(CURRENT_DIR, "combined_features_analysis.png")
 
 def main():
     if not os.path.exists(INPUT_CSV):
-        print("❌ Dataset not found. Run extract_forensic_features.py first.")
+        print(f"❌ Dataset not found at {INPUT_CSV}")
         return
-
     df = pd.read_csv(INPUT_CSV)
     
-    # Fix 'Final' steps (999999 -> Real Max + 500)
-    for size in df['Model_Size'].unique():
-        mask = (df['Model_Size'] == size)
-        max_step = df.loc[mask & (df['Step'] < 999999), 'Step'].max()
-        if pd.notna(max_step):
-            df.loc[mask & (df['Step'] == 999999), 'Step'] = max_step + 500
-    
-    model_sizes = df['Model_Size'].unique()
-    
-    # Define Feature Sets for Comparison
-    feature_sets = {
-        'My Method (Static)': ['Embedding_Norm'],
-        'My Method (Dynamic)': ['Avg_Next_Token_Prob'],
-        'Friend\'s Method': ['Weight_Skew', 'Weight_Kurtosis', 'Weight_Variance'],
-        'Combined (All)': ['Embedding_Norm', 'Avg_Next_Token_Prob', 'Weight_Skew']
+    # 1. הגדרת הסטים של הפיצ'רים בדיוק כמו בשקופיות שלהם
+    feature_configs = {
+        'Embedded Norm': ['Embedded_Norm'],
+        'Logit Norm': ['Logit_Norm'],
+        'Weight Variance': ['Weight_Variance'],
+        'Next-Token Prob (Your Feature)': ['Next_Token_Prob'],
+        'Friends Combined (Static)': ['Embedded_Norm', 'Logit_Norm', 'Weight_Variance', 'L1_Norm'],
+        'Full Fusion (Our Work)': ['Embedded_Norm', 'Logit_Norm', 'Weight_Variance', 'L1_Norm', 'Next_Token_Prob']
     }
     
-    # Setup Plot
-    plt.figure(figsize=(10, 4 * len(model_sizes)))
-    
-    for i, size in enumerate(model_sizes):
+    model_sizes = ['7M', '30M', '124M']
+    results = []
+
+    # חישוב R2 לכל קומבינציה (כמו בטבלה של Slide 4)
+    for size in model_sizes:
         subset = df[df['Model_Size'] == size]
-        if len(subset) < 5: continue
+        if subset.empty: continue
+        y = subset['Step']
         
-        ax = plt.subplot(len(model_sizes), 1, i+1)
-        y_true = subset['Step']
-        
-        print(f"\n📊 Results for Model {size}:")
-        
-        # Plot Ground Truth reference
-        ax.plot(y_true, y_true, 'k--', label='Ground Truth', alpha=0.3)
-        
-        colors = ['blue', 'green', 'orange', 'red']
-        
-        for (name, cols), color in zip(feature_sets.items(), colors):
+        for name, cols in feature_configs.items():
             X = subset[cols]
             
-            # Use Polynomial Regression (Degree 2) to allow for curves
-            model = make_pipeline(StandardScaler(), PolynomialFeatures(2), LinearRegression())
-            model.fit(X, y_true)
-            y_pred = model.predict(X)
-            r2 = r2_score(y_true, y_pred)
+            # Linear Regression
+            lin = make_pipeline(StandardScaler(), LinearRegression()).fit(X, y)
+            r2_lin = r2_score(y, lin.predict(X))
             
-            print(f"   > {name:<20} | R² = {r2:.4f}")
+            # MLP (Neural Network)
+            mlp = make_pipeline(StandardScaler(), MLPRegressor(hidden_layer_sizes=(50,50), max_iter=2000, random_state=42)).fit(X, y)
+            r2_mlp = r2_score(y, mlp.predict(X))
             
-            # Plot (Sort for clean lines)
-            sorted_idx = np.argsort(y_true)
-            ax.plot(y_true.iloc[sorted_idx], y_pred[sorted_idx], 
-                    label=f"{name} ($R^2$={r2:.3f})", color=color, linewidth=2, alpha=0.8)
-            
-        ax.set_title(f"Forensic Age Prediction ({size})")
-        ax.set_xlabel("Actual Steps (Ground Truth)")
-        ax.set_ylabel("Predicted Steps (Model Output)")
+            results.append({'Size': size, 'Method': name, 'Linear': r2_lin, 'MLP': r2_mlp})
+
+    # --- יצירת הטבלה (כמו בשקופית 4) ---
+    res_df = pd.DataFrame(results)
+    print("\n" + "="*50)
+    print("📊 R^2 COMPARISON TABLE (Matches Friend's Format)")
+    print("="*50)
+    pivot = res_df.pivot(index='Method', columns='Size', values=['Linear', 'MLP'])
+    print(pivot.round(4))
+
+    # --- יצירת גרף Combined (כמו בשקופית 6) ---
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    for i, size in enumerate(model_sizes):
+        subset = df[df['Model_Size'] == size].sort_values('Step')
+        ax = axes[i]
+        y_true = subset['Step']
+        
+        # חיזוי של ה-Full Fusion (השילוב של כולם)
+        X_full = subset[feature_configs['Full Fusion (Our Work)']]
+        model = make_pipeline(StandardScaler(), LinearRegression()).fit(X_full, y_true)
+        y_pred = model.predict(X_full)
+        
+        ax.scatter(y_true, y_pred, color='blue', alpha=0.6, label='Predicted vs Actual')
+        ax.plot(y_true, y_true, 'r--', label='Perfect Match')
+        
+        ax.set_title(f"Combined Features: {size} Model\n(Fusion R² = {r2_score(y_true, y_pred):.3f})", fontsize=14)
+        ax.set_xlabel("Actual Gradient Updates")
+        ax.set_ylabel("Predicted Updates")
         ax.legend()
         ax.grid(True, alpha=0.3)
-        
-    output_img = os.path.join(BASE_PATH, "final_forensic_comparison.png")
+
     plt.tight_layout()
-    plt.savefig(output_img)
-    print(f"\n✅ Graph saved to '{output_img}'")
+    plt.savefig(OUTPUT_COMBINED_IMG)
+    print(f"\n✅ Combined analysis graph saved to: {OUTPUT_COMBINED_IMG}")
 
 if __name__ == "__main__":
     main()

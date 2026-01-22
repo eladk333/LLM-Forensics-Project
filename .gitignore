@@ -11,3 +11,4 @@ __pycache__/
 analysis_cache.pkl
 graph_Model_*.png
 forensics_*_*_*.png
+slide_*.png

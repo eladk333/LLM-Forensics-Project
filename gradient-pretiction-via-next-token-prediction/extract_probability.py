@@ -13,7 +13,7 @@ from torch.utils.data import Dataset, DataLoader
 BASE_PATH = os.getcwd() 
 
 # Path structure based on your friend's code
-DATA_CACHE_PATH = os.path.join(BASE_PATH, "Data", "wiki", "wiki_103_full_cache.pt")
+DATA_CACHE_PATH = os.path.join(BASE_PATH, "data", "wiki", "wiki_103_full_cache.pt")
 CHECKPOINT_BASE_DIR = os.path.join(BASE_PATH, "data", "models")
 
 # Add minGPT
@@ -31,12 +31,12 @@ set_seed(3407)
 CONFIGS = {
     '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768},
     '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384},
-    # '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128}, # Commented out (Colab)
+    '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128}, # Commented out (Colab)
 }
 
 BATCH_SIZE = 64      
 BLOCK_SIZE = 128
-MAX_BATCHES = 200    
+MAX_BATCHES = 1000 
 NUM_WORKERS = 4      
 
 # ==========================================
@@ -187,7 +187,7 @@ def main():
                 
                 print(f"   ⏳ Analyzing Step {step}...", end="\r")
                 avg_prob = calculate_stats_on_fixed_data(model, fixed_batches, device)
-                print(f"   ✅ Step {step}: Avg Confidence = {avg_prob:.5f}")
+                print(f"   ✅ Step {step}: Avg Probability = {avg_prob:.5f}")
                 
                 all_results.append({"Model": f"Model {model_size}", "Step": step, "Avg_Probability": avg_prob})
             except Exception as e:

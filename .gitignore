@@ -5,7 +5,7 @@ checkpoints/
 # Ignore the dataset cache (it's large and can be regenerated)
 data/
 *.cache
-
+venv_*/
 venv/
 __pycache__/
 analysis_cache.pkl

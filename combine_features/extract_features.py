@@ -1,124 +1,130 @@
 import os
 import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), 'minGPT'))
 import torch
+import glob
+import re
 import pandas as pd
 import numpy as np
-from scipy.stats import skew, kurtosis  # <--- NEW LIBRARY
-from mingpt.model import GPT
-from transformers import GPT2Tokenizer
+from scipy.stats import skew, kurtosis
 
-# Model config
-MODEL_SIZE = '7M'
+# ==========================================
+# 1. CONFIGURATION & PATHS
+# ==========================================
+# Assuming this script runs inside 'combine_features/'
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.abspath(os.path.join(CURRENT_DIR, '..'))
+
+# Add minGPT to path
+sys.path.append(os.path.join(ROOT_DIR, 'minGPT'))
+
+try:
+    from mingpt.model import GPT
+except ImportError:
+    print("❌ Error: minGPT module not found. Check your folder structure.")
+    sys.exit(1)
+
+MODELS_DIR = os.path.join(ROOT_DIR, "data", "models")
+OUTPUT_CSV = os.path.join(CURRENT_DIR, "forensic_features.csv")
+
+# Model Architectures
 CONFIGS = {
     '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768},
     '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384},
     '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128},
 }
 
-# Paths
-BASE_FOLDER = r'G:\My Drive\llm\data\models'
-MODEL_PATH = os.path.join(BASE_FOLDER, f'MinGPT_Checkpoints_{MODEL_SIZE}')
-OUTPUT_FILE = os.path.join(MODEL_PATH, 'model_features.csv')
+# ==========================================
+# 2. FEATURE EXTRACTION LOGIC
+# ==========================================
+def get_step_from_filename(filename):
+    """Extracts step number from checkpoint filename."""
+    match = re.search(r'step_(\d+)', filename)
+    if match:
+        return int(match.group(1))
+    if 'final' in filename:
+        return 999999 # Place final model at the end
+    return -1
 
-
-
-def load_model():
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-    conf = CONFIGS[MODEL_SIZE]
-    model_config = GPT.get_default_config()
-    model_config.model_type = None
-    model_config.n_layer = conf['n_layer']
-    model_config.n_head = conf['n_head']
-    model_config.n_embd = conf['n_embd']
-    model_config.vocab_size = 50257
-    model_config.block_size = 128
-
-    model = GPT(model_config)
-    ckpt_path = os.path.join(MODEL_PATH, 'final_model_1_epoch.pt')
-    if not os.path.exists(ckpt_path):
-        raise FileNotFoundError(f"Model not found at {ckpt_path}")
+def extract_global_stats(model):
+    """
+    Extracts global statistical features from the model's embedding matrix.
+    Based on the logic from the original extract_features.py but applied globally.
+    """
+    # 1. Embedding Weights stats
+    wte = model.transformer.wte.weight.detach().cpu().numpy()
+    flat_wte = wte.flatten()
     
-    model.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
-    model.eval()
-    return model, tokenizer
-
-def get_weight_stats(model):
-    # Basic Stats (Variance, Mean, Norms)
-    embedding_matrix = model.transformer.wte.weight.detach().numpy()
+    # 2. Output Head stats (Logit Norm)
+    lm_head = model.lm_head.weight.detach().cpu().numpy()
     
-    # 1. Existing Features
-    l2_norm = np.linalg.norm(embedding_matrix, axis=1)
-    variance = np.var(embedding_matrix, axis=1)
-    mean = np.mean(embedding_matrix, axis=1)
+    return {
+        'embedding_norm': np.linalg.norm(wte),          # Total L2 Norm
+        'l1_norm':        np.linalg.norm(wte, ord=1),   # Total L1 Norm
+        'weight_variance': np.var(flat_wte),            # Global Variance
+        'weight_skew':    skew(flat_wte),               # Skewness
+        'weight_kurtosis': kurtosis(flat_wte),          # Kurtosis
+        'logit_norm':     np.linalg.norm(lm_head)       # Logit/De-embedding Norm
+    }
+
+# ==========================================
+# 3. MAIN EXECUTION
+# ==========================================
+def main():
+    print(f"🚀 Starting Forensic Feature Extraction...")
+    print(f"📂 Reading models from: {MODELS_DIR}")
     
-    # 2. NEW: L1 Norm (Manhattan Distance)
-    l1_norm = np.linalg.norm(embedding_matrix, ord=1, axis=1)
-    
-    # 3. NEW: Distance to Center (Euclidean distance to the average token)
-    # This checks if the token is an "outlier" (frequent) or "average" (rare)
-    global_mean_vector = np.mean(embedding_matrix, axis=0)
-    dist_to_center = np.linalg.norm(embedding_matrix - global_mean_vector, axis=1)
+    all_records = []
 
-    return l2_norm, variance, mean, l1_norm, dist_to_center
+    for size, conf in CONFIGS.items():
+        model_folder = os.path.join(MODELS_DIR, size)
+        if not os.path.exists(model_folder):
+            print(f"⚠️  Skipping {size} (Folder not found)")
+            continue
+            
+        print(f"⚙️  Processing {size}...")
+        
+        # Initialize Architecture
+        model_config = GPT.get_default_config()
+        model_config.model_type = None
+        model_config.n_layer = conf['n_layer']
+        model_config.n_head = conf['n_head']
+        model_config.n_embd = conf['n_embd']
+        model_config.vocab_size = 50257
+        model_config.block_size = 128
+        model = GPT(model_config)
 
-def get_advanced_stats(model):
-    # Shape Statistics (Skew, Kurtosis)
-    embedding_matrix = model.transformer.wte.weight.detach().numpy()
-    
-    # 4. NEW: Skewness (Asymmetry of the weight distribution)
-    # Rare tokens ~ 0 (Symmetric). Frequent tokens != 0.
-    skew_val = skew(embedding_matrix, axis=1)
-    
-    # 5. NEW: Kurtosis (Pointiness/Tail heaviness)
-    kurt_val = kurtosis(embedding_matrix, axis=1)
-    
-    return skew_val, kurt_val
+        # Iterate Checkpoints
+        checkpoints = glob.glob(os.path.join(model_folder, "*.pt"))
+        print(f"   Found {len(checkpoints)} checkpoints.")
 
-def get_logit_norms(model):
-    weights = model.lm_head.weight.detach().numpy()
-    return np.linalg.norm(weights, axis=1)
+        for i, ckpt_path in enumerate(checkpoints):
+            step = get_step_from_filename(os.path.basename(ckpt_path))
+            if step == -1: continue
 
-def extract_features():
-    print(f"Loading {MODEL_SIZE} model...")
-    model, tokenizer = load_model()
+            if i % 10 == 0: print(f"   ⏳ Scanning Step {step}...", end='\r')
 
-    # --- 6. NEW: Tokenizer Features (Zipf's Law) ---
-    vocab_size = 50257
-    token_strings = [tokenizer.decode([i]) for i in range(vocab_size)]
-    
-    # Calculate string length (shorter words are often more frequent)
-    # We use 'strip' to ignore the leading space ' ' that GPT uses
-    token_lengths = [len(s.strip()) if len(s.strip()) > 0 else 0 for s in token_strings]
-    
-    # Check if first letter is capital (Capitalized words are often rarer proper nouns)
-    is_upper = [1 if (s.strip() and s.strip()[0].isupper()) else 0 for s in token_strings]
+            try:
+                state_dict = torch.load(ckpt_path, map_location='cpu')
+                model.load_state_dict(state_dict)
+                
+                features = extract_global_stats(model)
+                features['Model'] = f"Model {size}" # Naming convention: "Model 7M"
+                features['Step'] = step
+                all_records.append(features)
 
-    df = pd.DataFrame({
-        'token_id': np.arange(vocab_size),
-        'token_str': token_strings,
-        'token_len': token_lengths,  # New
-        'is_upper': is_upper         # New
-    })
-    
-    print("Extracting Weight Statistics (Norms, Var, Mean, L1, Dist)...")
-    l2, var, mean, l1, dist = get_weight_stats(model)
-    df['embedding_norm'] = l2
-    df['weight_variance'] = var
-    df['weight_mean'] = mean
-    df['l1_norm'] = l1              # New
-    df['dist_to_center'] = dist     # New
+            except Exception as e:
+                print(f"\n   ❌ Failed to load {os.path.basename(ckpt_path)}: {e}")
 
-    print("Extracting Advanced Stats (Skew, Kurtosis)...")
-    skew_val, kurt_val = get_advanced_stats(model)
-    df['weight_skew'] = skew_val    # New
-    df['weight_kurtosis'] = kurt_val # New
+        print(f"\n   ✅ Finished {size}.")
 
-    print("Extracting Logit Norms...")
-    df['logit_norm'] = get_logit_norms(model)
-
-    df.to_csv(OUTPUT_FILE, index=False)
-    print(f"✅ Saved expanded feature file: {OUTPUT_FILE}")
+    # Save Results
+    if all_records:
+        df = pd.DataFrame(all_records)
+        df.sort_values(by=['Model', 'Step'], inplace=True)
+        df.to_csv(OUTPUT_CSV, index=False)
+        print(f"\n🎉 Success! Forensic features saved to: {OUTPUT_CSV}")
+    else:
+        print("\n❌ No data extracted. Check your model paths.")
 
 if __name__ == "__main__":
-    extract_features()
+    main()

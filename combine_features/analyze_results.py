@@ -1,8 +1,9 @@
+import matplotlib
+matplotlib.use('TkAgg') # Use the basic and stable Windows graphics engine
+import matplotlib.pyplot as plt
+from matplotlib.widgets import RadioButtons, CheckButtons
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.widgets import RadioButtons, CheckButtons, Button
-import seaborn as sns
 from sklearn.linear_model import LinearRegression
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
@@ -27,7 +28,7 @@ FEATURE_CONFIG = {
     'Logit Norm':          'logit_norm',
     'Weight Variance':     'weight_variance',
     'L1 Norm':             'l1_norm',
-    'Next-Token Probability': 'Avg_Probability' # From your probability experiment
+    'Next-Token Probability': 'Avg_Probability'
 }
 FEATURES_LIST = list(FEATURE_CONFIG.keys())
 MODEL_SIZES = ['7M', '30M', '124M']
@@ -35,15 +36,12 @@ MODEL_SIZES = ['7M', '30M', '124M']
 # ==========================================
 # 2. SPECIALIZED PREDICTION MODELS
 # ==========================================
-# Logic from predict_gradient.py (Exponential/Inverse Model)
 def inverse_exp_func(prob, a, b):
     return a * np.exp(b * prob)
 
-# Logic from 3.txt (Polynomial Regression)
 def get_poly_model(degree=2):
     return make_pipeline(StandardScaler(), PolynomialFeatures(degree), LinearRegression())
 
-# Standard Models
 def get_linear_model():
     return make_pipeline(StandardScaler(), LinearRegression())
 
@@ -54,9 +52,22 @@ def get_mlp_model():
 # 3. DATA LOADING & MERGING
 # ==========================================
 def load_and_merge_data():
-    if not os.path.exists(FEATURE_CSV) or not os.path.exists(PROB_CSV):
-        print("❌ Error: Missing input CSV files.")
+    # Fix: Global declaration must be the first line in the function
+    global PROB_CSV 
+    
+    # Check for file existence
+    if not os.path.exists(FEATURE_CSV):
+        print(f"❌ Error: Missing forensic features file at: {FEATURE_CSV}")
         return None
+        
+    if not os.path.exists(PROB_CSV):
+        # Try finding the file in the current directory if it was copied there
+        alt_path = os.path.join(CURRENT_DIR, "probability_results_server.csv")
+        if os.path.exists(alt_path):
+            PROB_CSV = alt_path # Update global path
+        else:
+            print(f"❌ Error: Missing probability file at: {PROB_CSV}")
+            return None
 
     print("🔄 Merging Forensic Data...")
     df_feats = pd.read_csv(FEATURE_CSV)
@@ -66,7 +77,7 @@ def load_and_merge_data():
     df_probs['Model'] = df_probs['Model'].apply(lambda x: x if 'Model' in x else f"Model {x}")
     df_feats['Model'] = df_feats['Model'].astype(str)
     
-    # Merge on Model and Step
+    # Merge
     df_merged = pd.merge(df_feats, df_probs, on=['Model', 'Step'], how='inner')
     print(f"✅ Merged Dataset: {len(df_merged)} samples.")
     return df_merged
@@ -78,9 +89,11 @@ class ForensicAnalyzer:
     def __init__(self, df):
         self.df = df
         self.fig, self.ax = plt.subplots(figsize=(12, 7))
-        plt.subplots_adjust(left=0.3)
         
-        self.selected_features = [FEATURES_LIST[0]] # Default: Embedding Norm
+        # Increase left margin to prevent buttons from overlapping Y-axis labels
+        plt.subplots_adjust(left=0.35)
+        
+        self.selected_features = [FEATURES_LIST[0]]
         self.selected_model_type = 'Linear'
         self.current_size = '124M'
         
@@ -112,7 +125,6 @@ class ForensicAnalyzer:
         self.update_plot()
 
     def set_features(self, label):
-        # Toggle logic handled by CheckButtons visually, need to update internal state
         self.selected_features = [l for l, state in zip(FEATURES_LIST, self.check_feat.get_status()) if state]
         self.update_plot()
 
@@ -130,7 +142,7 @@ class ForensicAnalyzer:
         X = subset[cols].values
         y = subset['Step'].values
 
-        # Special Case: Exponential Model (only works for Probability)
+        # Exponential Model Logic
         if self.selected_model_type == 'Exponential':
             if len(cols) == 1 and cols[0] == 'Avg_Probability':
                 try:
@@ -138,7 +150,7 @@ class ForensicAnalyzer:
                     y_pred = inverse_exp_func(X.flatten(), *popt)
                     r2 = r2_score(y, y_pred)
                     self.ax.plot(y, y_pred, 'g-', label=f'Exp Fit (R²={r2:.3f})')
-                    self.ax.set_title(f"Exponential Model (Probability Analysis)\nFormula: Steps = {popt[0]:.2e} * exp({popt[1]:.2f} * p)")
+                    self.ax.set_title(f"Exponential Model (Probability)\nSteps = {popt[0]:.2e} * exp({popt[1]:.2f} * p)")
                 except:
                     self.ax.set_title("Exponential Fit Failed")
             else:
@@ -162,7 +174,8 @@ class ForensicAnalyzer:
             self.ax.set_title(f"Forensic Prediction | Model: {self.current_size} | Regressor: {self.selected_model_type}")
 
         # Common Plotting
-        self.ax.scatter(y, y, c='red', marker='--', alpha=0.5, label='Ground Truth') # Ideal line
+        self.ax.plot(y, y, color='red', linestyle='--', alpha=0.5, label='Ideal (Ground Truth)')
+        
         if self.selected_model_type != 'Exponential':
             self.ax.scatter(y, y_pred, alpha=0.6, label='Predictions')
 

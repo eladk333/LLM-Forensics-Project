@@ -12,7 +12,7 @@ from torch.utils.data import Dataset, DataLoader
 # ==========================================
 BASE_PATH = os.getcwd() 
 
-# Path structure based on your friend's code
+# Path structure based on your current setup
 DATA_CACHE_PATH = os.path.join(BASE_PATH, "data", "wiki", "wiki_103_full_cache.pt")
 CHECKPOINT_BASE_DIR = os.path.join(BASE_PATH, "data", "models")
 
@@ -31,7 +31,7 @@ set_seed(3407)
 CONFIGS = {
     '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768},
     '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384},
-    '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128}, # Commented out (Colab)
+    '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128}, 
 }
 
 BATCH_SIZE = 64      
@@ -81,6 +81,10 @@ def get_fixed_batches(loader, max_batches):
     return fixed_data
 
 def calculate_stats_on_fixed_data(model, fixed_batches, device):
+    """
+    MODIFIED: Now returns a list of probabilities (one for each batch), 
+    instead of a single averaged number.
+    """
     model.eval()
     all_probs = []
     with torch.no_grad():
@@ -91,15 +95,14 @@ def calculate_stats_on_fixed_data(model, fixed_batches, device):
                 probs = F.softmax(logits, dim=-1)
                 y_expanded = y.unsqueeze(-1)
                 correct_probs = probs.gather(-1, y_expanded).squeeze(-1)
+                # We still average WITHIN the batch, but we append the batch result to the list
                 all_probs.append(correct_probs.mean().item())
-    if not all_probs: return 0.0
-    return np.mean(all_probs)
+                
+    if not all_probs: return []
+    # Return the full list of 1000 batches, not the np.mean()
+    return all_probs 
 
 def get_all_checkpoints_smart(folder_path):
-    """
-    CRITICAL FIX: Handles 'final_model_1_epoch.pt' correctly.
-    Ignores the '1' in '1_epoch' and places final model at the end.
-    """
     all_files = glob.glob(os.path.join(folder_path, "*.pt"))
     numbered = []
     final_file = None
@@ -107,23 +110,19 @@ def get_all_checkpoints_smart(folder_path):
     for f in all_files:
         fname = os.path.basename(f)
         
-        # Check for Final Model
         if "final_model" in fname or "full_epoch" in fname:
             final_file = f
             continue
             
-        # Check for Numbered Steps
         parts = fname.replace('.pt', '').split('_')
         for p in parts:
             if p.isdigit():
-                # FIX: Ignore '1' if it comes from '1_epoch'
                 if p == '1' and 'epoch' in fname: continue
                 numbered.append((int(p), f))
                 break
     
     numbered.sort(key=lambda x: x[0])
     
-    # Assign Final Model to (Max Step + 500)
     if final_file:
         if numbered:
             max_step = numbered[-1][0]
@@ -158,7 +157,6 @@ def main():
         
         if not os.path.exists(ckpt_folder):
             print(f"⚠️  Folder not found at: {ckpt_folder}")
-            # Optional fallback
             alt_path = os.path.join(BASE_PATH, f"MinGPT_Checkpoints_{model_size}")
             if os.path.exists(alt_path):
                 print(f"   -> Found alternative: {alt_path}")
@@ -176,7 +174,6 @@ def main():
         model_config.block_size = BLOCK_SIZE
         model = GPT(model_config).to(device)
 
-        # USE SMART DETECTION HERE
         valid_ckpts = get_all_checkpoints_smart(ckpt_folder)
         print(f"ℹ️  Found {len(valid_ckpts)} checkpoints to analyze.")
 
@@ -186,18 +183,30 @@ def main():
                 model.load_state_dict(state_dict)
                 
                 print(f"   ⏳ Analyzing Step {step}...", end="\r")
-                avg_prob = calculate_stats_on_fixed_data(model, fixed_batches, device)
-                print(f"   ✅ Step {step}: Avg Probability = {avg_prob:.5f}")
                 
-                all_results.append({"Model": f"Model {model_size}", "Step": step, "Avg_Probability": avg_prob})
+                # Returns a list of ~1000 probabilities (one per batch)
+                batch_probs = calculate_stats_on_fixed_data(model, fixed_batches, device)
+                
+                # Append EACH batch as a separate row in our dataset
+                for batch_idx, prob in enumerate(batch_probs):
+                    all_results.append({
+                        "Model": f"Model {model_size}", 
+                        "Step": step, 
+                        "Batch_ID": batch_idx, 
+                        "Batch_Probability": prob
+                    })
+                    
+                print(f"   ✅ Step {step}: Extracted {len(batch_probs)} batch probabilities.")
+                
             except Exception as e:
                 print(f"\n   ❌ Error: {e}")
 
     if all_results:
         df = pd.DataFrame(all_results)
-        output_csv = os.path.join(BASE_PATH, "probability_results_server.csv")
+        # Rename output file to reflect the new batch-level data
+        output_csv = os.path.join(BASE_PATH, "probability_results_batch_level.csv")
         df.to_csv(output_csv, index=False)
-        print(f"\n🎉 Saved results to: {output_csv}")
+        print(f"\n🎉 Saved massive batch-level dataset to: {output_csv}")
 
 if __name__ == "__main__":
     main()

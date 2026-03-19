@@ -8,7 +8,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
-from sklearn.metrics import r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 import os
 
 # Paths
@@ -50,7 +50,8 @@ def train_and_store(X_data, y_data):
     # Linear Model
     lin = LinearRegression().fit(X_train, y_train) # Trains the model
     lin_pred = lin.predict(X_test) # The prediction of the model y_hat
-    lin_r2 = r2_score(y_test, lin_pred) # R2 how good the model explains the data
+    lin_mae = mean_absolute_error(y_test, lin_pred) # Average absolute error in log_count units
+    lin_rmse = mean_squared_error(y_test, lin_pred, squared=False) # RMSE penalizes large errors more
 
     # MLP Model    
     mlp = make_pipeline( # Creates the model
@@ -66,7 +67,8 @@ def train_and_store(X_data, y_data):
     
     mlp.fit(X_train, y_train) # Train the model
     mlp_pred = mlp.predict(X_test) # The prediction of the model y_hat
-    mlp_r2 = r2_score(y_test, mlp_pred) # R2 how good the model explains the data
+    mlp_mae = mean_absolute_error(y_test, mlp_pred) # Average absolute error in log_count units
+    mlp_rmse = mean_squared_error(y_test, mlp_pred, squared=False) # RMSE penalizes large errors more
 
     # If only have 1 feature we can sort the x so we can see the data spread
     if X_test.shape[1] == 1:
@@ -84,7 +86,8 @@ def train_and_store(X_data, y_data):
         'lin_pred': lin_pred_sorted, 'mlp_pred': mlp_pred_sorted,
         'lin_pred_raw': lin_pred, 'mlp_pred_raw': mlp_pred,
         'y_test_raw': y_test,
-        'lin_r2': lin_r2, 'mlp_r2': mlp_r2
+        'lin_mae': lin_mae, 'lin_rmse': lin_rmse,
+        'mlp_mae': mlp_mae, 'mlp_rmse': mlp_rmse
     }
 
 
@@ -150,14 +153,14 @@ class ModularViewer:
                     ax.set_title(f"Projected on {label}")
                 
                 feature_count = len(active_feats)
-                plt.suptitle(f"Combined Model ({feature_count} features) - MLP R2: {data['mlp_r2']:.3f}", fontsize=16)
+                plt.suptitle(f"Combined Model ({feature_count} features) - MLP MAE: {data['mlp_mae']:.3f}  RMSE: {data['mlp_rmse']:.3f}", fontsize=16)
 
             else:
                 # Single Feature Spread
                 ax = self.fig.add_subplot(111)
                 sns.scatterplot(x=data['X_test'][self.current_feature_key], y=data['y_test'], ax=ax, alpha=0.3, color='gray', label='Actual')
-                ax.plot(data['X_test'][self.current_feature_key], data['lin_pred'], 'b--', lw=2, label=f"Linear (R2={data['lin_r2']:.3f})")
-                ax.plot(data['X_test'][self.current_feature_key], data['mlp_pred'], 'r-', lw=3, label=f"MLP (R2={data['mlp_r2']:.3f})")
+                ax.plot(data['X_test'][self.current_feature_key], data['lin_pred'], 'b--', lw=2, label=f"Linear (MAE={data['lin_mae']:.3f})")
+                ax.plot(data['X_test'][self.current_feature_key], data['mlp_pred'], 'r-', lw=3, label=f"MLP (MAE={data['mlp_mae']:.3f})")
                 ax.set_title(f"{display_name} vs Frequency ({self.current_model})", fontsize=16)
                 ax.set_xlabel(display_name)
                 ax.set_ylabel("Log Frequency")
@@ -179,12 +182,12 @@ class ModularViewer:
 
             sns.scatterplot(x=y_true, y=lin_pred, ax=ax1, alpha=0.3, color='blue')
             plot_diag(ax1)
-            ax1.set_title(f"Linear Regression (R2: {data['lin_r2']:.3f})")
+            ax1.set_title(f"Linear Regression (MAE: {data['lin_mae']:.3f}  RMSE: {data['lin_rmse']:.3f})")
             ax1.set_xlabel("Actual"); ax1.set_ylabel("Predicted"); ax1.set_box_aspect(1)
 
             sns.scatterplot(x=y_true, y=mlp_pred, ax=ax2, alpha=0.3, color='green')
             plot_diag(ax2)
-            ax2.set_title(f"MLP Neural Net (R2: {data['mlp_r2']:.3f})")
+            ax2.set_title(f"MLP Neural Net (MAE: {data['mlp_mae']:.3f}  RMSE: {data['mlp_rmse']:.3f})")
             ax2.set_xlabel("Actual"); ax2.set_ylabel("Predicted"); ax2.set_box_aspect(1)
             
             plt.suptitle(f"Prediction Accuracy: {display_name} ({self.current_model})", fontsize=16)
@@ -301,7 +304,7 @@ class ModularViewer:
             
             global_storage[self.current_model]['combined'] = new_results
             global_storage[self.current_model]['active_combined_features'] = selected_features
-            print(f"   ✅ Retraining Complete. R2: {new_results['mlp_r2']:.4f}")
+            print(f"   ✅ Retraining Complete. MAE: {new_results['mlp_mae']:.4f}  RMSE: {new_results['mlp_rmse']:.4f}")
                         
 
         # 5. Refresh Plot

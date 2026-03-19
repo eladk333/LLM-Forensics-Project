@@ -5,6 +5,15 @@ import re
 import pandas as pd
 import numpy as np
 
+# --- ML Imports for Cross Validation ---
+try:
+    from sklearn.linear_model import LinearRegression
+    from sklearn.model_selection import KFold, cross_val_score
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+    print("⚠️ scikit-learn not installed. Cross-validation will be skipped.")
+
 # ==========================================
 # 1. SERVER CONFIGURATION
 # ==========================================
@@ -121,8 +130,28 @@ def main():
         all_results.extend(process_folder(name, path, sorted_token_ids))
 
     if all_results:
-        pd.DataFrame(all_results).to_csv(OUTPUT_CSV, index=False)
+        df_results = pd.DataFrame(all_results)
+        df_results.to_csv(OUTPUT_CSV, index=False)
         print(f"\n🎉 Success! Empirical data saved to: {OUTPUT_CSV}")
+
+        # --- NEW: Cross-Validation Step ---
+        if SKLEARN_AVAILABLE:
+            print("\n" + "="*50)
+            print("🧠 RUNNING 5-FOLD CROSS-VALIDATION ON BASELINE (60 Points)")
+            print("="*50)
+            for name in CONFIGS.keys():
+                model_data = df_results[(df_results['Model'] == name) & 
+                                        (df_results['Method'] == 'Stat') & 
+                                        (df_results['Bin_ID'] == 'Mean')]
+                if len(model_data) > 0:
+                    X = model_data[['Feature_Value']].values
+                    y = model_data['Step'].values
+                    
+                    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+                    cv_scores = cross_val_score(LinearRegression(), X, y, cv=kf, scoring='r2')
+                    
+                    print(f"✅ Model {name:4s} | Baseline CV R²: {cv_scores.mean():.4f} (+/- {cv_scores.std():.4f})")
+            print("="*50 + "\n")
 
 if __name__ == "__main__":
     main()

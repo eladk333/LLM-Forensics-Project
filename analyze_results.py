@@ -48,9 +48,20 @@ def train_and_store(X_data, y_data):
     X_train, X_test, y_train, y_test = train_test_split(X_data, y_data, test_size=0.2, random_state=42) # seed 42 for it not to change between runs
     
     # Linear Model
-    lin = LinearRegression().fit(X_train, y_train) # Trains the model
+    lin = make_pipeline(StandardScaler(), LinearRegression())
+    lin.fit(X_train, y_train) # Trains the model
     lin_pred = lin.predict(X_test) # The prediction of the model y_hat
     lin_r2 = r2_score(y_test, lin_pred) # R2 how good the model explains the data
+
+    # Extract and print standardized weights for combined features
+    if X_train.shape[1] > 1:
+        feature_names = X_train.columns
+        weights = lin.named_steps['linearregression'].coef_
+        impact_list = sorted(zip(feature_names, weights), key=lambda x: abs(x[1]), reverse=True)
+        print(f"\n--- Standardized Feature Weights (Impact) ---")
+        for name, weight in impact_list:
+            print(f"{name}: {weight:.4f}")
+        print("---------------------------------------------")
 
     # MLP Model    
     mlp = make_pipeline( # Creates the model
@@ -88,41 +99,112 @@ def train_and_store(X_data, y_data):
     }
 
 
+def train_on_one_model_test_on_another(X_train, y_train, X_test, y_test):
+    if X_train.shape[1] == 0:
+        return None
 
+    # Linear model
+    lin = make_pipeline(StandardScaler(), LinearRegression())
+    lin.fit(X_train, y_train)
+    lin_pred = lin.predict(X_test)
+    lin_r2 = r2_score(y_test, lin_pred)
+
+    # Print standardized weights for combined features
+    if X_train.shape[1] > 1:
+        feature_names = X_train.columns
+        weights = lin.named_steps['linearregression'].coef_
+        impact_list = sorted(zip(feature_names, weights), key=lambda x: abs(x[1]), reverse=True)
+        print(f"\n--- Standardized Feature Weights (Impact) ---")
+        for name, weight in impact_list:
+            print(f"{name}: {weight:.4f}")
+        print("---------------------------------------------")
+
+    # MLP model
+    mlp = make_pipeline(
+        StandardScaler(),
+        MLPRegressor(
+            hidden_layer_sizes=(100, 50),
+            activation='tanh',
+            max_iter=2000,
+            early_stopping=True,
+            validation_fraction=0.1,
+            n_iter_no_change=10,
+            random_state=42
+        )
+    )
+
+    mlp.fit(X_train, y_train)
+    mlp_pred = mlp.predict(X_test)
+    mlp_r2 = r2_score(y_test, mlp_pred)
+
+    # Sort only if there is one feature
+    if X_test.shape[1] == 1:
+        sort_idx = X_test.iloc[:, 0].argsort()
+        X_test_sorted = X_test.iloc[sort_idx]
+        y_test_sorted = y_test.iloc[sort_idx]
+        lin_pred_sorted = lin_pred[sort_idx]
+        mlp_pred_sorted = mlp_pred[sort_idx]
+    else:
+        X_test_sorted, y_test_sorted = X_test, y_test
+        lin_pred_sorted, mlp_pred_sorted = lin_pred, mlp_pred
+
+    return {
+        'X_test': X_test_sorted, 'y_test': y_test_sorted,
+        'lin_pred': lin_pred_sorted, 'mlp_pred': mlp_pred_sorted,
+        'lin_pred_raw': lin_pred, 'mlp_pred_raw': mlp_pred,
+        'y_test_raw': y_test,
+        'lin_r2': lin_r2, 'mlp_r2': mlp_r2
+    }
 
 class ModularViewer:
     def __init__(self):
-        self.models = list(global_storage.keys())
-        self.current_model = self.models[0]
+        self.screen_types = ['Within Model', 'Cross Model']
+        self.current_screen_type = 'Within Model'
+
+        self.within_model_keys = [k for k in global_storage.keys() if '->' not in k]
+        self.cross_model_keys = [k for k in global_storage.keys() if '->' in k]
+
+        if self.within_model_keys:
+            self.current_result_key = self.within_model_keys[0]
+        elif self.cross_model_keys:
+            self.current_result_key = self.cross_model_keys[0]
+        else:
+            self.current_result_key = None
+
         self.view_types = ['Data Spread', 'Pred vs Actual']
         self.current_view_type = 'Data Spread'
-        
+
         # Start with 'combined' view
         self.current_feature_key = 'combined'
-        
+
         # Setup Figure
         self.fig = plt.figure(figsize=(16, 9))
         self.update()
 
-    def _plot(self):
-        # Determine if we are plotting a single feature or 'combined'
-        is_combined = (self.current_feature_key == 'combined')
-        
-        # Handle case where training failed (e.g. 0 features selected)
-        if global_storage[self.current_model].get(self.current_feature_key) is None:
-            plt.clf()
-            plt.text(0.5, 0.5, "No features selected for training.\nPlease select at least one feature and click 'Retrain'.", 
-                     ha='center', va='center', fontsize=14)
-            return
+        def _plot(self):
+            # Determine if we are plotting a single feature or 'combined'
+            is_combined = (self.current_feature_key == 'combined')
 
-        data = global_storage[self.current_model][self.current_feature_key]
+            if self.current_result_key is None:
+                plt.clf()
+                plt.text(0.5, 0.5, "No results available.", ha='center', va='center', fontsize=14)
+                return
+            
+            # Handle case where training failed (e.g. 0 features selected)
+            if global_storage[self.current_result_key].get(self.current_feature_key) is None:
+                plt.clf()
+                plt.text(0.5, 0.5, "No features selected for training.\nPlease select at least one feature and click 'Retrain'.", 
+                        ha='center', va='center', fontsize=14)
+                return
+
+        data = global_storage[self.current_result_key][self.current_feature_key]
         display_name = FEATURE_CONFIG.get(self.current_feature_key, "Combined Features") if not is_combined else "Combined Features"
 
         if self.current_view_type == 'Data Spread':
             # --- DATA SPREAD LOGIC ---
             if is_combined:
                 # Combined Spread: Show the features that were actually used
-                active_feats = global_storage[self.current_model].get('active_combined_features', [])
+                ax.set_title(f"{display_name} vs Frequency ({self.current_result_key})", fontsize=16)
                 
                 # Show up to 2 features for reference
                 feats_to_show = active_feats[:2] 
@@ -313,49 +395,89 @@ if __name__ == "__main__":
 
     # Load token frequency file
     if os.path.exists(FREQ_FILE):
-        df_freq = pd.read_csv(FREQ_FILE)        
+        df_freq = pd.read_csv(FREQ_FILE)
     else:
         print(f"File not found at {FREQ_FILE}")
         exit()
 
-    # 2. Train Models Loop
+    # Load all model data first
     for size in MODEL_SIZES:
-        print(f"\nProcessing Model: {size}")
-        
-        # Path for the feature file
+        print(f"\nLoading Model Data: {size}")
+
         feature_file = os.path.join(BASE_MODELS_FOLDER, f'MinGPT_Checkpoints_{size}', 'model_features.csv')
-        
+
         if not os.path.exists(feature_file):
             print(f"Feature file not found for {size}. Skipping")
             continue
 
-        
-        df_features = pd.read_csv(feature_file) # Load feature file into df
-        valid_features = [f for f in FEATURES_LIST if f in df_features.columns] # Filter for only features we have 
-                
+        df_features = pd.read_csv(feature_file)
+        valid_features = [f for f in FEATURES_LIST if f in df_features.columns]
 
-        df = pd.merge(df_freq, df_features, on='token_id', how='inner') # Merge the freq file with the features file
-        y = df['log_count'] # Define the log count column as the traget of our predictor models
-        
-        # Stores the data so we could retrain on less features later on
+        df = pd.merge(df_freq, df_features, on='token_id', how='inner')
+        y = df['log_count']
+
         global_dataframes[size] = {'df': df, 'y': y, 'valid_features': valid_features}
-        global_storage[size] = {'features': valid_features}
 
-        # Train Individual Features        
-        for feat in valid_features:
-            global_storage[size][feat] = train_and_store(df[[feat]], y)
-        
-        # Train Initial Combined
-        print(f"   Training combined model...")
-        global_storage[size]['combined'] = train_and_store(df[valid_features], y)
-        global_storage[size]['active_combined_features'] = valid_features
+    if '7M' not in global_dataframes:
+        print("\n7M data was not loaded.")
+        exit()
+
+    # Train ONLY on 7M
+    train_model = '7M'
+    train_df = global_dataframes[train_model]['df']
+    train_y = global_dataframes[train_model]['y']
+
+    global_storage[train_model] = {'features': global_dataframes[train_model]['valid_features']}
+
+    # Individual features trained on 7M and tested on 7M
+    for feat in global_dataframes[train_model]['valid_features']:
+        global_storage[train_model][feat] = train_and_store(train_df[[feat]], train_y)
+
+    # Combined trained on 7M and tested on 7M
+    print(f"\nTraining combined model on {train_model}...")
+    global_storage[train_model]['combined'] = train_and_store(train_df[global_dataframes[train_model]['valid_features']], train_y)
+    global_storage[train_model]['active_combined_features'] = global_dataframes[train_model]['valid_features']
+    print("   ✅ 7M self-test done.")
+
+    # Cross-model evaluation: train on 7M, test on 30M and 124M
+    for test_model in ['30M', '124M']:
+        if test_model not in global_dataframes:
+            print(f"\n{test_model} data was not loaded. Skipping.")
+            continue
+
+        print(f"\nCross-evaluating: Train on 7M -> Test on {test_model}")
+
+        test_df = global_dataframes[test_model]['df']
+        test_y = global_dataframes[test_model]['y']
+
+        train_feats = set(global_dataframes['7M']['valid_features'])
+        test_feats = set(global_dataframes[test_model]['valid_features'])
+        common_features = [f for f in FEATURES_LIST if f in train_feats and f in test_feats]
+
+        global_storage[test_model] = {'features': common_features}
+
+        # Individual features: trained on 7M, tested on target model
+        for feat in common_features:
+            global_storage[test_model][feat] = train_on_one_model_test_on_another(
+                train_df[[feat]], train_y,
+                test_df[[feat]], test_y
+            )
+
+        # Combined: trained on 7M, tested on target model
+        print(f"   Training combined on 7M and testing on {test_model}...")
+        global_storage[test_model]['combined'] = train_on_one_model_test_on_another(
+            train_df[common_features], train_y,
+            test_df[common_features], test_y
+        )
+        global_storage[test_model]['active_combined_features'] = common_features
 
         print(f"   ✅ Done.")
+        print(f"   Linear R2: {global_storage[test_model]['combined']['lin_r2']:.4f}")
+        print(f"   MLP R2: {global_storage[test_model]['combined']['mlp_r2']:.4f}")
 
     if not global_storage:
         print("\nNo models loaded.")
         exit()
-    
 
     viewer = ModularViewer()
     plt.show()

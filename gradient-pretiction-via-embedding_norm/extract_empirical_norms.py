@@ -81,7 +81,15 @@ def process_folder(model_name, folder_path, sorted_token_ids):
     for file_path, step in file_step_map.items():
         try:
             state_dict = torch.load(file_path, map_location='cpu')
-            wte = state_dict.get('transformer.wte.weight') or state_dict.get('wte.weight')
+            
+            # --- THE FIX: Safe dictionary checking instead of 'or' ---
+            if 'transformer.wte.weight' in state_dict:
+                wte = state_dict['transformer.wte.weight']
+            elif 'wte.weight' in state_dict:
+                wte = state_dict['wte.weight']
+            else:
+                wte = None
+            # ---------------------------------------------------------
                 
             if wte is not None:
                 token_norms = torch.norm(wte, p=2, dim=1)

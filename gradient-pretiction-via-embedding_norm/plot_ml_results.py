@@ -2,9 +2,12 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import KFold, cross_val_score, train_test_split
 from sklearn.metrics import mean_absolute_error, r2_score
+import warnings
+warnings.filterwarnings('ignore') # To suppress setting with copy warnings for clean output
 
 # ==========================================
 # 1. SETUP & PATHS
@@ -76,7 +79,7 @@ def run_full_analysis():
         print(f"🎨 Generating all plots for {model}...")
         m_df = df[df['Model'] == model]
 
-        # --- PLOT 0: RAW DATA DYNAMICS (Steps vs Norm) ---
+        # --- PLOT 0: RAW DATA DYNAMICS (Steps vs Norm - Highlights) ---
         b0 = m_df[(m_df['Method'] == 'Frequency') & (m_df['Bin_ID'] == '0')].sort_values('Step')
         b40 = m_df[(m_df['Method'] == 'Frequency') & (m_df['Bin_ID'] == '40')].sort_values('Step')
         r0 = m_df[(m_df['Method'] == 'Random') & (m_df['Bin_ID'] == '0')].sort_values('Step')
@@ -91,8 +94,55 @@ def run_full_analysis():
                           (r0['Step'], r0['Feature_Value'], "Random Control")]
         )
 
+        # --- NEW PLOT 0.1: ALL FREQUENCY BINS (Spaghetti Plot) ---
+        plt.figure(figsize=(11, 7))
+        f_df_all = m_df[m_df['Method'] == 'Frequency'].copy()
+        # Convert to int to sort properly and map to colors
+        f_df_all['Bin_ID_int'] = pd.to_numeric(f_df_all['Bin_ID'], errors='coerce').fillna(0).astype(int)
+        bins_freq = sorted(f_df_all['Bin_ID_int'].unique())
+        
+        # Color mapping: warm colors for low IDs (frequent), cool colors for high IDs (rare)
+        color_map = cm.coolwarm_r(np.linspace(0, 1, len(bins_freq)))
+        
+        for b in bins_freq:
+            b_data = f_df_all[f_df_all['Bin_ID_int'] == b].sort_values('Step')
+            plt.plot(b_data['Step'], b_data['Feature_Value'], color=color_map[bins_freq.index(b)], alpha=0.7, linewidth=1.5)
+        
+        plt.title(f"{model} - All Frequency Bins: Granular Norm Growth", fontsize=15, fontweight='bold')
+        plt.xlabel("Training Steps", fontsize=12)
+        plt.ylabel("Embedding L2 Norm", fontsize=12)
+        
+        # Add Colorbar
+        sm = plt.cm.ScalarMappable(cmap=cm.coolwarm_r, norm=plt.Normalize(vmin=min(bins_freq), vmax=max(bins_freq)))
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=plt.gca())
+        cbar.set_label('Bin ID (0=Most Frequent, 49=Rare)', fontsize=12)
+        
+        plt.grid(True, linestyle='--', alpha=0.4)
+        plt.tight_layout()
+        plt.savefig(os.path.join(PLOTS_DIR, f"{model}_0.1_Raw_Frequency_All.png"), dpi=300)
+        plt.close()
+
+        # --- NEW PLOT 0.2: ALL RANDOM BINS (Control Spaghetti Plot) ---
+        plt.figure(figsize=(11, 7))
+        r_df_all = m_df[m_df['Method'] == 'Random'].copy()
+        r_df_all['Bin_ID_int'] = pd.to_numeric(r_df_all['Bin_ID'], errors='coerce').fillna(0).astype(int)
+        bins_rand = sorted(r_df_all['Bin_ID_int'].unique())
+        
+        for b in bins_rand:
+            b_data = r_df_all[r_df_all['Bin_ID_int'] == b].sort_values('Step')
+            # Plotting them all in gray-ish blue to show they cluster tightly
+            plt.plot(b_data['Step'], b_data['Feature_Value'], color='steelblue', alpha=0.4, linewidth=1.5)
+        
+        plt.title(f"{model} - All Random Bins: Tightly Clustered Growth", fontsize=15, fontweight='bold')
+        plt.xlabel("Training Steps", fontsize=12)
+        plt.ylabel("Embedding L2 Norm", fontsize=12)
+        plt.grid(True, linestyle='--', alpha=0.4)
+        plt.tight_layout()
+        plt.savefig(os.path.join(PLOTS_DIR, f"{model}_0.2_Raw_Random_All.png"), dpi=300)
+        plt.close()
+
         # --- PLOT 0.5: RAW GLOBAL BASELINE (Steps vs Norm - No ML) ---
-        # ADDED: This shows the raw correlation without the regression target swap
         g_raw = m_df[m_df['Method'] == 'Global'].sort_values('Step')
         plot_master(
             x_data=g_raw['Step'], y_data=g_raw['Feature_Value'],
@@ -142,7 +192,6 @@ def run_full_analysis():
         )
 
         # --- PLOT 3: RANDOM BINS ML (True vs Pred) ---
-        # ADDED: This is essential to show that Random Bins perform differently
         r_df = m_df[m_df['Method'] == 'Random']
         X_r = r_df[['Feature_Value', 'Bin_ID']].values
         y_r = r_df['Step'].values

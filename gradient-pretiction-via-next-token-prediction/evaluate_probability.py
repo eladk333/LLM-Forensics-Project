@@ -129,21 +129,30 @@ def run_full_analysis_and_plotting():
 
         # --- PLOT 3: Individual Batch Cloud Forensics (X=Probability, Y=Steps) ---
         plt.figure(figsize=(10, 6))
-        mask_not_last = Y_batch < max_step_base
-        plt.scatter(X_batch[mask_not_last], Y_batch[mask_not_last], color=c, alpha=0.03, s=15, label='Batch Samples')
-        mask_last = Y_batch == max_step_base
-        plt.scatter(X_batch[mask_last], Y_batch[mask_last], color='darkred', alpha=0.15, s=20, label='Final Epoch Batches')
-        px_batch = np.linspace(X_batch.min(), X_batch.max(), 100)
+        
+        # חלוקת ה-Test Set ל"לא הצעד האחרון" ו"הצעד האחרון" בשביל הצבעים
+        mask_test_not_last = y_test_b < max_step_base
+        plt.scatter(X_test_b[mask_test_not_last], y_test_b[mask_test_not_last], color=c, alpha=0.1, s=25, label='Test Set Batches')
+        
+        mask_test_last = y_test_b == max_step_base
+        plt.scatter(X_test_b[mask_test_last], y_test_b[mask_test_last], color='darkred', alpha=0.3, s=30, label='Final Epoch Batches (Test)')
+        
+        # קו החיזוי
+        px_batch = np.linspace(X_test_b.min(), X_test_b.max(), 100)
         plt.plot(px_batch, inverse_model(px_batch, *popt_batch), color='black', linestyle='--', linewidth=2.5, label=f'Predictor (Test R²={batch_r2:.3f})')
-        plt.title(f"{model_name} Batch Forensics\nMethod: 80/20 Train-Test Split\nStep = {a_batch:.2f} * e^({b_batch:.2f} * Prob)", fontsize=14)
+        
+        plt.title(f"{model_name} Batch Forensics\nMethod: 80/20 Train-Test Split (Test Data Only)\nStep = {a_batch:.2f} * e^({b_batch:.2f} * Prob)", fontsize=14)
         plt.xlabel("Input: Single Batch Next Token Probability", fontsize=12, fontweight='bold')
         plt.ylabel("Target: Gradient Updates (Steps)", fontsize=12, fontweight='bold')
         plt.grid(True, linestyle='--', alpha=0.5)
+        
         leg = plt.legend(loc='upper left')
         for lh in leg.legend_handles: lh.set_alpha(1)
+        
         plt.savefig(os.path.join(OUTPUT_IMG_DIR, f"3_batch_cloud_{model_name.replace(' ', '_')}.png"), dpi=300)
         plt.close()
 
+        
     # ==========================================
     # PART 2: COMBINED PLOTS (ALL MODELS)
     # ==========================================

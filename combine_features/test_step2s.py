@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import os
 import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold
 from sklearn.neural_network import MLPRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Ridge
@@ -128,7 +128,6 @@ def run_step2s_tests():
         X_test_scaled = scaler.transform(X_test)
         
         for algo_name, algo in algorithms.items():
-            # Fit and predict
             algo.fit(X_train_scaled, y_train)
             y_pred = algo.predict(X_test_scaled)
             
@@ -141,6 +140,47 @@ def run_step2s_tests():
                                      "Internal Architecture Prediction (80/20)", filename)
 
     # =====================================================================
+    # TEST 2b: 5-FOLD CV EDITION
+    # =====================================================================
+    print("\n" + "="*85)
+    print(f"{'TEST 2b: 5-FOLD CV EDITION PER MODEL':^85}")
+    print("="*85)
+    
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+
+    for model_name in models:
+        df_model = df[df['Model'] == model_name].copy()
+        if df_model.empty: continue
+        
+        print(f"\nTarget Architecture: {model_name}")
+        print("-" * 40)
+        
+        X = df_model[feature_cols].values
+        Y = df_model['Step'].values
+        
+        for algo_name, algo in algorithms.items():
+            y_pred_cv = np.zeros_like(Y, dtype=float)
+            
+            for train_idx, test_idx in kf.split(X):
+                X_train, X_test = X[train_idx], X[test_idx]
+                y_train, y_test = Y[train_idx], Y[test_idx]
+                
+                scaler = StandardScaler()
+                X_train_scaled = scaler.fit_transform(X_train)
+                X_test_scaled = scaler.transform(X_test)
+                
+                algo.fit(X_train_scaled, y_train)
+                y_pred_cv[test_idx] = algo.predict(X_test_scaled)
+            
+            r2 = r2_score(Y, y_pred_cv)
+            mae = mean_absolute_error(Y, y_pred_cv)
+            print(f"  -> {algo_name:<15} | R2: {r2:+.4f} | MAE: +/- {mae:.1f} steps")
+            
+            filename = f"test2b_CV_{model_name}_{algo_name}.png"
+            plot_actual_vs_predicted(Y, y_pred_cv, model_name, algo_name, 
+                                     "Internal Architecture Prediction (5-Fold CV)", filename)
+
+    # =====================================================================
     # TEST 5: HONEST ZERO-SHOT CROSS-ARCHITECTURE (Scaling by sqrt(N_EMBD))
     # =====================================================================
     print("\n\n" + "="*85)
@@ -149,7 +189,6 @@ def run_step2s_tests():
     
     df_honest = df.copy()
     
-    # Apply Physics-based scaling
     for model_name, n_embd in EMBED_DIM_MAP.items():
         mask = df_honest['Model'] == model_name
         if mask.sum() > 0:

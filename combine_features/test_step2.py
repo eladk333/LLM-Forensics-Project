@@ -2,42 +2,51 @@ import pandas as pd
 import numpy as np
 import os
 import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.model_selection import train_test_split, GroupShuffleSplit
 from sklearn.neural_network import MLPRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_absolute_error
 from sklearn.preprocessing import StandardScaler
+import warnings
+
+warnings.filterwarnings("ignore", category=UserWarning)
 
 # ==========================================
 # CONFIGURATION & ARCHITECTURE DATA
 # ==========================================
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-MATRIX_PATH = os.path.join(CURRENT_DIR, 'step2_master_matrix.csv')
-GRAPHS_DIR = os.path.join(CURRENT_DIR, 'micro_graphs-embed_norm_and_prob')
+
+# Data paths
+MATRICES = {
+    'Original': os.path.join(CURRENT_DIR, 'step2_master_matrix.csv'),
+    'Interaction': os.path.join(CURRENT_DIR, 'step2_interaction_matrix.csv')
+}
+
+# Graph directories
+DIRS = {
+    'Original': os.path.join(CURRENT_DIR, 'micro_graphs-step2_original'),
+    'Interaction': os.path.join(CURRENT_DIR, 'micro_graphs-step2_interaction')
+}
 
 EMBED_DIM_MAP = {'7M': 128, '30M': 384, '124M': 768}
-LAYER_MAP = {'7M': 4, '30M': 6, '124M': 12}
 
-def setup_graphs_dir():
-    if not os.path.exists(GRAPHS_DIR):
-        os.makedirs(GRAPHS_DIR)
-        print(f"📁 Created graphs directory at: {GRAPHS_DIR}")
+def setup_graphs_dir(path):
+    if not os.path.exists(path):
+        os.makedirs(path)
+        print(f"📁 Created graphs directory at: {path}")
 
-def plot_actual_vs_predicted(y_true, y_pred, model_name, test_type, filename):
+def plot_actual_vs_predicted(y_true, y_pred, model_name, test_type, filename, save_dir):
     r2 = r2_score(y_true, y_pred)
     mae = mean_absolute_error(y_true, y_pred)
     
     plt.figure(figsize=(10, 8))
-    # Updated Label per your request
     plt.scatter(y_true, y_pred, alpha=0.4, color='royalblue', edgecolors='k', 
-                label='Step Prediction (per Batch Probability + Checkpoint Bins)')
+                label='Step Prediction')
     
-    # Ideal line
     min_val, max_val = y_true.min(), y_true.max()
-    plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=3, label='Ideal Identity Line (Perfect Accuracy)')
+    plt.plot([min_val, max_val], [min_val, max_val], 'r--', lw=3, label='Ideal Identity Line')
     
-    plt.title(f"Architecture: {model_name} | {test_type}\nMethod: 80/20 Split (Grouped by Checkpoint - Zero Leakage)", fontsize=14)
+    plt.title(f"Architecture: {model_name} | {test_type}", fontsize=14)
     plt.xlabel('Ground Truth (Actual Training Steps)', fontsize=12)
     plt.ylabel('Model Prediction (Estimated Training Steps)', fontsize=12)
     
@@ -48,171 +57,98 @@ def plot_actual_vs_predicted(y_true, y_pred, model_name, test_type, filename):
     plt.legend(loc='lower right', fontsize=11)
     plt.grid(True, linestyle=':', alpha=0.6)
     plt.tight_layout()
-    plt.savefig(os.path.join(GRAPHS_DIR, filename), dpi=300)
+    plt.savefig(os.path.join(save_dir, filename), dpi=300)
     plt.close()
 
-def plot_zero_shot_comparison(zero_shot_results):
-    plt.figure(figsize=(11, 7))
-    names = list(zero_shot_results.keys())
-    scores = list(zero_shot_results.values())
-    
-    colors = ['#ff9999', '#99cc99'] 
-    
-    bars = plt.bar(names, scores, color=colors, edgecolor='black', width=0.6)
-    plt.axhline(0, color='black', lw=1.2)
-    plt.ylim(-1.2, 1.2)
-    
-    for bar in bars:
-        yval = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width()/2, yval + 0.05 if yval > 0 else yval - 0.1, 
-                 f'R² = {yval:.4f}', ha='center', va='bottom', fontweight='bold', fontsize=12)
-        
-    plt.ylabel('R² Score', fontsize=12)
-    plt.title('124M Zero-Shot Performance (Train on 7M+30M -> Test on 124M)', fontsize=14)
-    plt.grid(axis='y', alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(os.path.join(GRAPHS_DIR, 'zero_shot_comparison_bar.png'), dpi=300)
-    plt.close()
-
-def check_feature_importance(df, feature_cols):
-    """Bonus function to answer: How much does the Probability feature actually help?"""
-    print("\n" + "="*85)
-    print(f"{'FEATURE IMPORTANCE ANALYSIS (Random Forest)':^85}")
-    print("="*85)
-    df_7m = df[df['Model'] == '7M'].copy()
-    if df_7m.empty: return
-    
-    X, Y = df_7m[feature_cols].values, df_7m['Step'].values
-    rf = RandomForestRegressor(n_estimators=50, random_state=42)
-    rf.fit(X, Y)
-    
-    importances = rf.feature_importances_
-    prob_importance = importances[0] # Assuming Batch_Probability is the first column
-    bins_importance = np.sum(importances[1:])
-    
-    print(f"Contribution of Batch_Probability: {prob_importance*100:.2f}%")
-    print(f"Contribution of all 50 Bins combined: {bins_importance*100:.2f}%")
-    print(f"Top 3 most important individual Bins:")
-    
-    bin_imp_pairs = [(feature_cols[i], importances[i]) for i in range(1, len(feature_cols))]
-    bin_imp_pairs.sort(key=lambda x: x[1], reverse=True)
-    for i in range(3):
-        print(f"  - {bin_imp_pairs[i][0]}: {bin_imp_pairs[i][1]*100:.2f}%")
+def get_mlp():
+    return MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=100, early_stopping=True)
 
 def run_all_micro_tests():
-    if not os.path.exists(MATRIX_PATH):
-        print(f"Error: Master matrix not found at {MATRIX_PATH}")
-        return
+    comparison_results = {'Original': {}, 'Interaction': {}}
 
-    setup_graphs_dir()
-    df = pd.read_csv(MATRIX_PATH)
-    
-    feature_cols = ['Batch_Probability'] + [col for col in df.columns if col.startswith('Bin_')]
-    bin_cols = [col for col in df.columns if col.startswith('Bin_')]
-    models = ['7M', '30M', '124M']
-    
-    zero_shot_r2_scores = {}
-    
-    def get_mlp():
-        return MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=100, early_stopping=True)
+    for dataset_name, matrix_path in MATRICES.items():
+        if not os.path.exists(matrix_path):
+            print(f"❌ Error: Matrix not found at {matrix_path}")
+            continue
 
-    # =====================================================================
-    # TEST 1: RANDOM 80/20 SPLIT
-    # =====================================================================
-    print("\n" + "="*85)
-    print(f"{'TEST 1: RANDOM 80/20 SPLIT (DATA LEAKAGE EXPECTED)':^85}")
-    print("="*85)
-    for model_name in models:
-        df_model = df[df['Model'] == model_name].copy()
-        if df_model.empty: continue
-        X, Y = df_model[feature_cols].values, df_model['Step'].values
-        X_train, X_test, y_train, y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
-        scaler = StandardScaler()
-        mlp = get_mlp()
-        mlp.fit(scaler.fit_transform(X_train), y_train)
-        y_pred = mlp.predict(scaler.transform(X_test))
-        print(f"{model_name:<10} | R2: {r2_score(y_test, y_pred):.4f}")
+        print("\n" + "#"*85)
+        print(f"{f' RUNNING TESTS ON: {dataset_name.upper()} MATRIX ':^85}")
+        print("#"*85)
 
-    # =====================================================================
-    # TEST 2: GROUPED 80/20 SPLIT (Clean)
-    # =====================================================================
-    print("\n" + "="*85)
-    print(f"{'TEST 2: GROUPED BY CHECKPOINT (CLEAN EVALUATION)':^85}")
-    print("="*85)
-    for model_name in models:
-        df_model = df[df['Model'] == model_name].copy()
-        if df_model.empty: continue
-        X, Y = df_model[feature_cols].values, df_model['Step'].values
-        groups = df_model['Step'].values
-        gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
-        train_idx, test_idx = next(gss.split(X, Y, groups))
+        save_dir = DIRS[dataset_name]
+        setup_graphs_dir(save_dir)
+        df = pd.read_csv(matrix_path)
         
-        scaler = StandardScaler()
-        mlp = get_mlp()
-        mlp.fit(scaler.fit_transform(X[train_idx]), Y[train_idx])
-        y_pred = mlp.predict(scaler.transform(X[test_idx]))
-        
-        print(f"{model_name:<10} | R2: {r2_score(Y[test_idx], y_pred):.4f} | MAE: +/- {mean_absolute_error(Y[test_idx], y_pred):.1f}")
-        
-        plot_actual_vs_predicted(Y[test_idx], y_pred, model_name, 
-                                 "Clean Internal Evaluation (Unseen Checkpoints)", 
-                                 f"test2_clean_grouped_{model_name}.png")
+        # Dynamically grab features (excluding Model and Step)
+        feature_cols = [col for col in df.columns if col not in ['Model', 'Step']]
+        bin_cols = [col for col in df.columns if col.startswith('Bin_')]
+        models = ['7M', '30M', '124M']
 
-    # =====================================================================
-    # TEST 3: UNNORMALIZED (Commented out per request)
-    # =====================================================================
-    """
-    df_train, df_test = df[df['Model'].isin(['7M', '30M'])].copy(), df[df['Model'] == '124M'].copy()
-    if not df_train.empty and not df_test.empty:
-        scaler = StandardScaler()
-        mlp = get_mlp()
-        mlp.fit(scaler.fit_transform(df_train[feature_cols].values), df_train['Step'].values)
-        y_pred = mlp.predict(scaler.transform(df_test[feature_cols].values))
-        r2 = r2_score(df_test['Step'].values, y_pred)
-        zero_shot_r2_scores['1. Unnormalized (Scale Mismatch)'] = max(r2, -1.0)
-    """
-
-    # =====================================================================
-    # TEST 5: HONEST CROSS-MODEL (Scaling by sqrt(N_EMBD))
-    # =====================================================================
-    print("\n" + "="*85)
-    print(f"{'TEST 5: HONEST CROSS-ARCHITECTURE (Scaling by sqrt(N_EMBD))':^85}")
-    print("="*85)
-    df_honest = df.copy()
-    for model_name, n_embd in EMBED_DIM_MAP.items():
-        mask = df_honest['Model'] == model_name
-        if mask.sum() > 0:
-            df_honest.loc[mask, bin_cols] = df_honest.loc[mask, bin_cols] / np.sqrt(n_embd)
+        # TEST 2: GROUPED 80/20 SPLIT
+        print("\n--- TEST 2: GROUPED BY CHECKPOINT ---")
+        for model_name in models:
+            df_model = df[df['Model'] == model_name].copy()
+            if df_model.empty: continue
+            X, Y = df_model[feature_cols].values, df_model['Step'].values
+            groups = df_model['Step'].values
+            gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+            train_idx, test_idx = next(gss.split(X, Y, groups))
             
-    df_train_h = df_honest[df_honest['Model'].isin(['7M', '30M'])]
-    df_test_h = df_honest[df_honest['Model'] == '124M']
-    
-    if not df_train_h.empty and not df_test_h.empty:
-        scaler = StandardScaler()
-        mlp_h = get_mlp()
-        mlp_h.fit(scaler.fit_transform(df_train_h[feature_cols].values), df_train_h['Step'].values)
-        y_pred_h = mlp_h.predict(scaler.transform(df_test_h[feature_cols].values))
-        
-        r2_h = r2_score(df_test_h['Step'].values, y_pred_h)
-        mae_h = mean_absolute_error(df_test_h['Step'].values, y_pred_h)
-        
-        # *** THIS IS THE PRINT STATEMENT THAT WAS MISSING ***
-        print(f"{'124M (Honest)':<10} | R2: {r2_h:.4f} | MAE: +/- {mae_h:.1f}")
-        
-        zero_shot_r2_scores['2. Honest N_EMBD (Physics-based)'] = r2_h
-        
-        plot_actual_vs_predicted(df_test_h['Step'].values, y_pred_h, "124M (Zero-Shot Prediction)", 
-                                 "Train: 7M & 30M Models -> Predict: 124M Model", 
-                                 "test5_honest_zero_shot_124m.png")
+            scaler = StandardScaler()
+            mlp = get_mlp()
+            mlp.fit(scaler.fit_transform(X[train_idx]), Y[train_idx])
+            y_pred = mlp.predict(scaler.transform(X[test_idx]))
+            
+            r2 = r2_score(Y[test_idx], y_pred)
+            print(f"{model_name:<10} | R2: {r2:.4f}")
+            comparison_results[dataset_name][f'Grouped_{model_name}'] = r2
+            
+            plot_actual_vs_predicted(Y[test_idx], y_pred, model_name, 
+                                     "Clean Internal Evaluation", 
+                                     f"test2_clean_grouped_{model_name}.png", save_dir)
 
-    print("-" * 85 + "\nAll Tests Complete.\n")
+        # TEST 5: HONEST CROSS-MODEL
+        print("\n--- TEST 5: HONEST CROSS-ARCHITECTURE (124M Zero-Shot) ---")
+        df_honest = df.copy()
+        for model_name, n_embd in EMBED_DIM_MAP.items():
+            mask = df_honest['Model'] == model_name
+            if mask.sum() > 0:
+                df_honest.loc[mask, bin_cols] = df_honest.loc[mask, bin_cols] / np.sqrt(n_embd)
+                
+        df_train_h = df_honest[df_honest['Model'].isin(['7M', '30M'])]
+        df_test_h = df_honest[df_honest['Model'] == '124M']
+        
+        if not df_train_h.empty and not df_test_h.empty:
+            scaler = StandardScaler()
+            mlp_h = get_mlp()
+            mlp_h.fit(scaler.fit_transform(df_train_h[feature_cols].values), df_train_h['Step'].values)
+            y_pred_h = mlp_h.predict(scaler.transform(df_test_h[feature_cols].values))
+            
+            r2_h = r2_score(df_test_h['Step'].values, y_pred_h)
+            print(f"{'124M (Honest)':<10} | R2: {r2_h:.4f}")
+            comparison_results[dataset_name]['ZeroShot_124M'] = r2_h
+            
+            plot_actual_vs_predicted(df_test_h['Step'].values, y_pred_h, "124M (Zero-Shot)", 
+                                     "Train: 7M & 30M -> Predict: 124M", 
+                                     "test5_honest_zero_shot_124m.png", save_dir)
+
+    # =====================================================================
+    # COMPARISON SUMMARY OUTPUT
+    # =====================================================================
+    print("\n\n" + "="*85)
+    print(f"{' A/B TEST RESULTS SUMMARY (STEP 2: NOISY BATCH DATA) ':^85}")
+    print("="*85)
+    print(f"{'Metric':<25} | {'Original Setup (R²)':<20} | {'Interaction Setup (R²)':<20}")
+    print("-" * 85)
     
-    # Run the feature importance check
-    check_feature_importance(df, feature_cols)
-    
-    if len(zero_shot_r2_scores) >= 2:
-        plot_zero_shot_comparison(zero_shot_r2_scores)
-    print(f"\n📉 Detailed scatter plots saved to: {GRAPHS_DIR}")
+    keys = list(comparison_results['Original'].keys())
+    for k in keys:
+        orig_val = comparison_results['Original'].get(k, 0)
+        int_val = comparison_results['Interaction'].get(k, 0)
+        winner = "✨ Original" if orig_val > int_val else "✨ Interaction"
+        if abs(orig_val - int_val) < 0.001: winner = "Tie"
+        print(f"{k:<25} | {orig_val:<20.4f} | {int_val:<20.4f} | Winner: {winner}")
+    print("="*85 + "\n")
 
 if __name__ == "__main__":
     run_all_micro_tests()

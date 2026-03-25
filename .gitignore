@@ -19,3 +19,5 @@ token_norms_extraction.log
 
 step2_master_matrix.csv
 step2s_master_matrix.csv
+step2_interaction_matrix.csv
+step2s_interaction_matrix.csv

@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import os
+import matplotlib
+matplotlib.use("Agg")  # Safe backend for saving plots without GUI
 import matplotlib.pyplot as plt
 from sklearn.model_selection import KFold
 from sklearn.neural_network import MLPRegressor
@@ -67,7 +69,7 @@ def plot_actual_vs_predicted(y_true, y_pred, model_name, algo_name, test_type, f
 
 def run_step2s_tests():
     # Store results for final summary [Dataset][Algo][Metric] = R2
-    summary = {'Original': {}, 'Interaction': {}}
+    summary = {}
 
     for dataset_name, matrix_path in MATRICES.items():
         if not os.path.exists(matrix_path):
@@ -86,7 +88,9 @@ def run_step2s_tests():
         bin_cols = [col for col in df.columns if col.startswith('Bin_')]
         models = ['7M', '30M', '124M']
 
+        # -----------------------------------------------------------------
         # TEST 2b: 5-FOLD CV EDITION
+        # -----------------------------------------------------------------
         print("\n--- TEST 2b: 5-FOLD CV EDITION ---")
         kf = KFold(n_splits=5, shuffle=True, random_state=42)
         
@@ -98,9 +102,9 @@ def run_step2s_tests():
             algorithms = get_algorithms()
             
             for algo_name, algo in algorithms.items():
-                if algo_name not in summary[dataset_name]: summary[dataset_name][algo_name] = {}
-                
                 y_pred_cv = np.zeros_like(Y, dtype=float)
+                
+                # Scaler remains inside the fold loop because train_idx changes per fold
                 for train_idx, test_idx in kf.split(X):
                     scaler = StandardScaler()
                     X_train_scaled = scaler.fit_transform(X[train_idx])
@@ -109,13 +113,17 @@ def run_step2s_tests():
                     y_pred_cv[test_idx] = algo.predict(X_test_scaled)
                 
                 r2 = r2_score(Y, y_pred_cv)
-                if model_name == '124M': summary[dataset_name][algo_name]['CV_124M'] = r2
+                if model_name == '124M': 
+                    # Safe dictionary assignment
+                    summary.setdefault(dataset_name, {}).setdefault(algo_name, {})['CV_124M'] = r2
                 
                 plot_actual_vs_predicted(Y, y_pred_cv, model_name, algo_name, 
                                          "Internal Architecture Prediction (5-Fold CV)", 
                                          f"test2b_CV_{model_name}_{algo_name}.png", save_dir)
 
-        # TEST 5: HONEST ZERO-SHOT
+        # -----------------------------------------------------------------
+        # TEST 5: HONEST ZERO-SHOT CROSS-ARCHITECTURE
+        # -----------------------------------------------------------------
         print("\n--- TEST 5: HONEST ZERO-SHOT CROSS-ARCHITECTURE ---")
         df_honest = df.copy()
         for model_name, n_embd in EMBED_DIM_MAP.items():
@@ -130,6 +138,7 @@ def run_step2s_tests():
             X_train_h, Y_train_h = df_train_h[feature_cols].values, df_train_h['Step'].values
             X_test_h, Y_test_h = df_test_h[feature_cols].values, df_test_h['Step'].values
             
+            # Moved Scaler OUTSIDE the algorithm loop
             scaler = StandardScaler()
             X_train_h_scaled = scaler.fit_transform(X_train_h)
             X_test_h_scaled = scaler.transform(X_test_h)
@@ -140,7 +149,8 @@ def run_step2s_tests():
                 y_pred_h = algo.predict(X_test_h_scaled)
                 r2_h = r2_score(Y_test_h, y_pred_h)
                 
-                summary[dataset_name][algo_name]['ZeroShot_124M'] = r2_h
+                # Safe dictionary assignment
+                summary.setdefault(dataset_name, {}).setdefault(algo_name, {})['ZeroShot_124M'] = r2_h
                 print(f"{algo_name:<15} | Zero-Shot R2: {r2_h:.4f}")
                 
                 plot_actual_vs_predicted(Y_test_h, y_pred_h, "124M (Zero-Shot)", algo_name, 
@@ -158,8 +168,8 @@ def run_step2s_tests():
     
     for algo in ['Ridge', 'RandomForest', 'MLP']:
         for metric in ['CV_124M', 'ZeroShot_124M']:
-            orig_val = summary['Original'].get(algo, {}).get(metric, 0)
-            int_val = summary['Interaction'].get(algo, {}).get(metric, 0)
+            orig_val = summary.get('Original', {}).get(algo, {}).get(metric, 0)
+            int_val = summary.get('Interaction', {}).get(algo, {}).get(metric, 0)
             winner = "✨ Original" if orig_val > int_val else "✨ Interaction"
             if abs(orig_val - int_val) < 0.001: winner = "Tie"
             print(f"{algo:<15} | {metric:<15} | {orig_val:<15.4f} | {int_val:<15.4f} | {winner}")

@@ -119,31 +119,58 @@ class ForensicAnalyzer:
             
             cols = [FEATURE_CONFIG[f] for f in self.selected_features]
             
-            # ----------------------------------------------------
+                        # ----------------------------------------------------
             # ZERO-SHOT LOGIC
             # ----------------------------------------------------
             if self.current_size == 'Zero-Shot (->124M)':
+                
+                cols = [FEATURE_CONFIG[f] for f in self.selected_features]
+                
+                # Allow Exponential ONLY when using Probability alone
                 if self.selected_model_type == 'Exponential':
-                    self.ax.set_title("⚠️ Exp works only with single Architecture & Probability", color='red')
-                    plt.draw()
-                    return
+                    if len(cols) == 1 and cols[0] == 'Avg_Probability':
+                        # Exponential Zero-Shot on Probability only
+                        df_train = self.df[self.df['Model'].isin(['Model 7M', 'Model 30M'])]
+                        df_test = self.df[self.df['Model'] == 'Model 124M']
+                        
+                        X_train = df_train['Avg_Probability'].values.reshape(-1, 1)
+                        y_train = df_train['Step'].values
+                        X_test = df_test['Avg_Probability'].values.reshape(-1, 1)
+                        y_test = df_test['Step'].values
+                        
+                        # Fit exponential on training data (7M + 30M)
+                        popt, _ = curve_fit(inverse_exp_func, X_train.flatten(), y_train, maxfev=10000, bounds=(0, [np.inf, np.inf]))
+                        
+                        y_pred = inverse_exp_func(X_test.flatten(), *popt)
+                        r2 = r2_score(y_test, y_pred)
+                        
+                        self.ax.scatter(y_test, y_pred, color='purple', alpha=0.7, 
+                                      label=f'Zero-Shot Exp (R²={r2:.3f})')
+                        self.ax.set_title("Zero-Shot: Train 7M+30M -> Test 124M | Exponential on Probability only")
+                        y_plot = y_test
+                    else:
+                        self.ax.set_title("⚠️ Exponential in Zero-Shot works only with Probability alone", color='red')
+                        plt.draw()
+                        return
+                
+                # Regular Linear / Polynomial / MLP for Zero-Shot (with normalization)
+                else:
+                    df_scaled = self.scale_features(self.df, cols)
+                    df_train = df_scaled[df_scaled['Model'].isin(['Model 7M', 'Model 30M'])]
+                    df_test = df_scaled[df_scaled['Model'] == 'Model 124M']
                     
-                df_scaled = self.scale_features(self.df, cols)
-                df_train = df_scaled[df_scaled['Model'].isin(['Model 7M', 'Model 30M'])]
-                df_test = df_scaled[df_scaled['Model'] == 'Model 124M']
-                
-                X_train, y_train = df_train[cols].values, df_train['Step'].values
-                X_test, y_test = df_test[cols].values, df_test['Step'].values
-                
-                model = get_model(self.selected_model_type)
-                model.fit(X_train, y_train)
-                y_pred = model.predict(X_test)
-                r2 = r2_score(y_test, y_pred)
-                
-                self.ax.scatter(y_test, y_pred, color='purple', alpha=0.7, label=f'Zero-Shot Pred (R²={r2:.3f})')
-                self.ax.set_title(f"Zero-Shot: Train 7M+30M -> Test 124M | Model: {self.selected_model_type}")
-                y_plot = y_test
-                
+                    X_train, y_train = df_train[cols].values, df_train['Step'].values
+                    X_test, y_test = df_test[cols].values, df_test['Step'].values
+                    
+                    model = get_model(self.selected_model_type)
+                    model.fit(X_train, y_train)
+                    y_pred = model.predict(X_test)
+                    r2 = r2_score(y_test, y_pred)
+                    
+                    self.ax.scatter(y_test, y_pred, color='purple', alpha=0.7, 
+                                  label=f'Zero-Shot Pred (R²={r2:.3f})')
+                    self.ax.set_title(f"Zero-Shot: Train 7M+30M -> Test 124M | Model: {self.selected_model_type}")
+                    y_plot = y_test
             # ----------------------------------------------------
             # INTERNAL ARCHITECTURE LOGIC
             # ----------------------------------------------------

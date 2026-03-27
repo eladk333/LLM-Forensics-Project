@@ -41,7 +41,7 @@ def setup_graphs_dir(path):
 def get_algorithms():
     return {
         'MLP': MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=100, early_stopping=True),
-        'Ridge': Ridge(alpha=1.0, random_state=42),
+        'Ridge': Ridge(alpha=50.0, random_state=42, solver='cholesky'),
         'RandomForest': RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=8)
     }
 

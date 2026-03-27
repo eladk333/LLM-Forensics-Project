@@ -13,7 +13,7 @@ graph_Model_*.png
 forensics_*_*_*.png
 slide_*.png
 
-
+run_results.log
 extraction_output.log
 token_norms_extraction.log
 

@@ -95,8 +95,10 @@ def run_all_micro_tests():
         print(f"{f' RUNNING TESTS ON: {dataset_name.upper()} MATRIX ':^85}")
         print("#"*85)
 
-        save_dir = DIRS[dataset_name]
-        setup_graphs_dir(save_dir)
+        should_generate_graphs = dataset_name == 'Interaction'
+        save_dir = DIRS[dataset_name] if should_generate_graphs else None
+        if should_generate_graphs:
+            setup_graphs_dir(save_dir)
         df = pd.read_csv(matrix_path)
         
         feature_cols = [col for col in df.columns if col not in ['Model', 'Step']]
@@ -131,9 +133,10 @@ def run_all_micro_tests():
                 if model_name == '124M':
                     summary.setdefault(dataset_name, {}).setdefault(algo_name, {})['Test1_Random_124M'] = r2
                 
-                plot_actual_vs_predicted(y_test, y_pred, model_name, algo_name,
-                                         "Random Split (Leakage Expected)", 
-                                         f"test1_random_{model_name}_{algo_name}.png", save_dir)
+                if should_generate_graphs:
+                    plot_actual_vs_predicted(y_test, y_pred, model_name, algo_name,
+                                             "Random Split (Leakage Expected)", 
+                                             f"test1_random_{model_name}_{algo_name}.png", save_dir)
 
         # -----------------------------------------------------------------
         # TEST 2: GROUPED 80/20 SPLIT
@@ -165,9 +168,10 @@ def run_all_micro_tests():
                 if model_name == '124M': 
                     summary.setdefault(dataset_name, {}).setdefault(algo_name, {})['Test2_Grouped_124M'] = r2
                 
-                plot_actual_vs_predicted(Y[test_idx], y_pred, model_name, algo_name,
-                                         "Clean Internal Evaluation (Grouped)", 
-                                         f"test2_grouped_{model_name}_{algo_name}.png", save_dir)
+                if should_generate_graphs:
+                    plot_actual_vs_predicted(Y[test_idx], y_pred, model_name, algo_name,
+                                             "Clean Internal Evaluation (Grouped)", 
+                                             f"test2_grouped_{model_name}_{algo_name}.png", save_dir)
 
         # -----------------------------------------------------------------
         # TEST 5: HONEST CROSS-ARCHITECTURE
@@ -202,9 +206,10 @@ def run_all_micro_tests():
 
                 summary.setdefault(dataset_name, {}).setdefault(algo_name, {})['Test5_ZeroShot_124M'] = r2_h
                 
-                plot_actual_vs_predicted(Y_test_h, y_pred_h, "124M (Zero-Shot)", algo_name,
-                                         "Train: 7M & 30M -> Predict: 124M", 
-                                         f"test5_honest_zero_shot_124m_{algo_name}.png", save_dir)
+                if should_generate_graphs:
+                    plot_actual_vs_predicted(Y_test_h, y_pred_h, "124M (Zero-Shot)", algo_name,
+                                             "Train: 7M & 30M -> Predict: 124M", 
+                                             f"test5_honest_zero_shot_124m_{algo_name}.png", save_dir)
 
     # =====================================================================
     # COMPARISON SUMMARY OUTPUT

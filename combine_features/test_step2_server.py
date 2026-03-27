@@ -19,8 +19,6 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # ==========================================
 # SERVER CONFIGURATION & PATHS (ROBUST VERSION)
 # ==========================================
-# This ensures BASE_DIR is always the 'combine_features' folder, 
-# no matter where you run the command from.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 MATRICES = {
@@ -72,6 +70,16 @@ def plot_actual_vs_predicted(y_true, y_pred, model_name, algo_name, test_type, f
     plt.savefig(os.path.join(save_dir, filename), dpi=300)
     plt.close()
 
+def print_test_header(test_name):
+    print(f"\n{'='*60}")
+    print(f"  {test_name}")
+    print(f"{'='*60}")
+    print(f"{'Model':<12} | {'Algorithm':<15} | {'R²':>8} | {'MAE':>12}")
+    print(f"{'-'*55}")
+
+def print_result_row(model_name, algo_name, r2, mae):
+    print(f"{model_name:<12} | {algo_name:<15} | {r2:>8.4f} | {mae:>12.1f}")
+
 def run_all_micro_tests():
     summary = {}
     start_time = time.time()
@@ -98,7 +106,8 @@ def run_all_micro_tests():
         # -----------------------------------------------------------------
         # TEST 1: RANDOM 80/20 SPLIT
         # -----------------------------------------------------------------
-        print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] --- TEST 1: RANDOM 80/20 SPLIT ---")
+        print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] --- TEST 1: RANDOM 80/20 SPLIT (DATA LEAKAGE EXPECTED) ---")
+        print_test_header("TEST 1: Random 80/20 Split")
         for model_name in models:
             df_model = df[df['Model'] == model_name].copy()
             if df_model.empty: continue
@@ -115,7 +124,10 @@ def run_all_micro_tests():
                 algo.fit(X_train_scaled, y_train)
                 y_pred = algo.predict(X_test_scaled)
                 r2 = r2_score(y_test, y_pred)
+                mae = mean_absolute_error(y_test, y_pred)
                 
+                print_result_row(model_name, algo_name, r2, mae)
+
                 if model_name == '124M':
                     summary.setdefault(dataset_name, {}).setdefault(algo_name, {})['Test1_Random_124M'] = r2
                 
@@ -126,7 +138,8 @@ def run_all_micro_tests():
         # -----------------------------------------------------------------
         # TEST 2: GROUPED 80/20 SPLIT
         # -----------------------------------------------------------------
-        print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] --- TEST 2: GROUPED BY CHECKPOINT ---")
+        print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] --- TEST 2: GROUPED BY CHECKPOINT (CLEAN EVALUATION) ---")
+        print_test_header("TEST 2: Grouped by Checkpoint")
         for model_name in models:
             df_model = df[df['Model'] == model_name].copy()
             if df_model.empty: continue
@@ -145,7 +158,10 @@ def run_all_micro_tests():
                 algo.fit(X_train_scaled, Y[train_idx])
                 y_pred = algo.predict(X_test_scaled)
                 r2 = r2_score(Y[test_idx], y_pred)
-                
+                mae = mean_absolute_error(Y[test_idx], y_pred)
+
+                print_result_row(model_name, algo_name, r2, mae)
+
                 if model_name == '124M': 
                     summary.setdefault(dataset_name, {}).setdefault(algo_name, {})['Test2_Grouped_124M'] = r2
                 
@@ -157,6 +173,7 @@ def run_all_micro_tests():
         # TEST 5: HONEST CROSS-ARCHITECTURE
         # -----------------------------------------------------------------
         print(f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] --- TEST 5: HONEST CROSS-ARCHITECTURE (Zero-Shot) ---")
+        print_test_header("TEST 5: Zero-Shot Cross-Architecture (Train: 7M+30M → Test: 124M)")
         df_honest = df.copy()
         for model_name, n_embd in EMBED_DIM_MAP.items():
             mask = df_honest['Model'] == model_name
@@ -179,7 +196,10 @@ def run_all_micro_tests():
                 algo.fit(X_train_h_scaled, Y_train_h)
                 y_pred_h = algo.predict(X_test_h_scaled)
                 r2_h = r2_score(Y_test_h, y_pred_h)
-                
+                mae_h = mean_absolute_error(Y_test_h, y_pred_h)
+
+                print_result_row("124M (ZS)", algo_name, r2_h, mae_h)
+
                 summary.setdefault(dataset_name, {}).setdefault(algo_name, {})['Test5_ZeroShot_124M'] = r2_h
                 
                 plot_actual_vs_predicted(Y_test_h, y_pred_h, "124M (Zero-Shot)", algo_name,

@@ -22,12 +22,12 @@ warnings.filterwarnings("ignore", category=UserWarning)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 MATRICES = {
-    'Original': os.path.join(BASE_DIR, 'step2_master_matrix.csv'),
+    # 'Original': os.path.join(BASE_DIR, 'step2_master_matrix.csv'), # Commented out the original matrix to prevent it from running
     'Interaction': os.path.join(BASE_DIR, 'step2_interaction_matrix.csv')
 }
 
 DIRS = {
-    'Original': os.path.join(BASE_DIR, 'micro_graphs-step2_original'),
+    # 'Original': os.path.join(BASE_DIR, 'micro_graphs-step2_original'), # Commented out the original directory
     'Interaction': os.path.join(BASE_DIR, 'micro_graphs-step2_interaction')
 }
 

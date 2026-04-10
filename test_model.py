@@ -6,38 +6,59 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 from transformers import GPT2Tokenizer
 import threading
-
-# Good examples to test context with:
-
-# The seventh named storm, third hurricane and first major hurricane of the 1988 Atlantic hurricane season, Gilbert developed from a tropical wave on September 8 while located 400 mi east of Barbados. Following intensification into a tropical storm the next day, Gilbert steadily strengthened as it tracked west-northwestward into the
-# The kilogram is defined in terms of three defining constants: a specific atomic transition frequency, which defines the duration of the second, the speed of light in vacuum, which defines the length of the metre, and the Planck constant, which when combined with the metre and second, defines the
-# The Battle of the Bulge, also known as the Ardennes Counteroffensive, was a major German offensive campaign on the Western Front during World War II. The battle lasted from 16 December 1944 to 25 January 1945. It was launched through the densely forested Ardennes region of Wallonia in eastern Belgium, northeast France, and Luxembourg, towards the end of the
+# --- Prompts for Testing ---
 prompt_capitals = """Beijing is the capital of China.
 Ottawa is the capital of Canada.
 Cairo is the capital of Egypt.
 Tokyo is the capital of Japan.
 Brasilia is the capital of Brazil.
 Madrid is the capital of"""
+
 prompt_currency = """The currency of China is the Yuan.
 The currency of India is the Rupee.
 The currency of the USA is the Dollar.
 The currency of Japan is the Yen.
 The currency of the UK is the Pound.
 The currency of France is the"""
+
 # --- Path Setup ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(current_dir, 'minGPT'))
 
 try:
     from mingpt.model import GPT
+    import mingpt.model # Required for the patch
 except ImportError:
     print("❌ Error: Could not import 'mingpt'. Make sure the 'minGPT' folder is in the same directory.")
     sys.exit(1)
 
+# --- ARCHITECTURE PATCH (Required to match train.py) ---
+class MultiGPUBlock(torch.nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.ln_1 = torch.nn.LayerNorm(config.n_embd)
+        self.attn = mingpt.model.CausalSelfAttention(config)
+        self.ln_2 = torch.nn.LayerNorm(config.n_embd)
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(config.n_embd, 4 * config.n_embd),
+            mingpt.model.NewGELU(),
+            torch.nn.Linear(4 * config.n_embd, config.n_embd),
+            torch.nn.Dropout(config.resid_pdrop),
+        )
+    def forward(self, x):
+        x = x + self.attn(self.ln_1(x))
+        x = x + self.mlp(self.ln_2(x))
+        return x
+
+# Apply the patch so GPT initializes with the correct layer names
+mingpt.model.Block = MultiGPUBlock
+
+
 # --- Configuration ---
-BASE_MODELS_FOLDER = r'G:\My Drive\llm\data\models'
+BASE_MODELS_FOLDER = r'C:\Users\eladk\LLM-Forensics-Project\data\models'
 
 MODEL_CONFIGS = {
+    '500M': {'n_layer': 24, 'n_head': 16, 'n_embd': 1280}, # <-- FIXED: Was 1024, now matches training script
     '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768},
     '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384},
     '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128},
@@ -61,7 +82,7 @@ class GPTPlayerApp:
         self.temperature_var = tk.DoubleVar(value=0.8) 
         self.top_k_var = tk.IntVar(value=40) 
         
-        self.banned_ids = {134, 1279, 2954, 29, 31,2488,136,133} # Start with your requested bans
+        self.banned_ids = set() # Fixed: Must be a set, not a dict
         
         # To track the last generated token for quick banning
         self.last_gen_id = None
@@ -72,8 +93,8 @@ class GPTPlayerApp:
         
         # Load default
         self.text_area.insert("1.0", "The history of the")
-        self.model_selector.set('124M')
-        self.load_model_thread('124M')
+        self.model_selector.set('500M')          # Changed from '124M'
+        self.load_model_thread('500M')
 
     def _setup_ui(self):
         # 1. Top Control Bar
@@ -187,15 +208,38 @@ class GPTPlayerApp:
             model_config = GPT.get_default_config()
             model_config.model_type = None
             model_config.n_layer = conf['n_layer']; model_config.n_head = conf['n_head']; model_config.n_embd = conf['n_embd']
-            model_config.vocab_size = 50257; model_config.block_size = 128
+            # 1. Dynamic block size based on the model
+            model_config.vocab_size = 50257
+            model_config.block_size = 1024 if size == '500M' else 128 
             
             model = GPT(model_config)
-            ckpt_path = os.path.join(BASE_MODELS_FOLDER, f'MinGPT_Checkpoints_{size}', 'final_model_1_epoch.pt')
+            
+            # 2. Custom path handling for the 500M model's naming convention
+            if size == '500M':
+                ckpt_path = os.path.join(BASE_MODELS_FOLDER, '500M_Context1024', 'ckpt_epoch_1_step_100000.pt')
+            else:
+                ckpt_path = os.path.join(BASE_MODELS_FOLDER, f'MinGPT_Checkpoints_{size}', 'final_model_1_epoch.pt')
             
             if not os.path.exists(ckpt_path): raise FileNotFoundError(f"Missing: {ckpt_path}")
-            model.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
+            # Load the file into memory
+            checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=True)
+            
+            # Extract weights
+            if 'model_state_dict' in checkpoint:
+                state_dict = checkpoint['model_state_dict']
+            else:
+                state_dict = checkpoint
+                
+            # Safely strip 'module.' prefix if the model was saved via DataParallel
+            unwrapped_state_dict = {}
+            for key, value in state_dict.items():
+                clean_key = key[7:] if key.startswith('module.') else key
+                unwrapped_state_dict[clean_key] = value
+                
+            model.load_state_dict(unwrapped_state_dict)
             model.eval()
             self.model = model
+            self.run_terminal_tests()
             self.root.after(0, lambda: self.status_label.config(text=f"Active: {size}", foreground="green"))
             self.root.after(0, self.trigger_inference)
         except Exception as e:
@@ -238,7 +282,11 @@ class GPTPlayerApp:
         if len(idx) == 0: return
 
         x = torch.tensor([idx], dtype=torch.long)
-        if x.size(1) > 128: x = x[:, -128:]
+        
+        # Determine max context based on current model
+        max_context = 1024 if self.model_selector.get() == '500M' else 128
+        
+        if x.size(1) > max_context: x = x[:, -max_context:]
 
         with torch.no_grad():
             logits, _ = self.model(x)
@@ -312,6 +360,107 @@ class GPTPlayerApp:
         self.text_area.insert(tk.END, self.tokenizer.decode([int(vals[1])]))
         self.text_area.see(tk.END)
         self.trigger_inference()
+
+    def run_terminal_tests(self):
+        if not self.model: return
+        
+        print("\n" + "="*50)
+        print(f"🧠 Running Factual Recall Tests (Top-5 & 5-Shot) for {self.model_selector.get()}...")
+        print("="*50)
+        
+        # Upgraded to strict 5-shot prompts based on standard evaluation practices
+        test_suite = [
+            {
+                "name": "Capital - Spain",
+                "prompt": "Beijing is the capital of China.\nOttawa is the capital of Canada.\nCairo is the capital of Egypt.\nTokyo is the capital of Japan.\nBrasilia is the capital of Brazil.\nMadrid is the capital of",
+                "expected": [" Spain", "Spain"]
+            },
+            {
+                "name": "Currency - France",
+                "prompt": "The currency of China is the Yuan.\nThe currency of India is the Rupee.\nThe currency of the USA is the Dollar.\nThe currency of Japan is the Yen.\nThe currency of the UK is the Pound.\nThe currency of France is the",
+                "expected": [" Euro", "Euro", " Franc"]
+            },
+            {
+                "name": "Company HQ - Google",
+                "prompt": "Microsoft is headquartered in Redmond.\nApple is headquartered in Cupertino.\nAmazon is headquartered in Seattle.\nMeta is headquartered in Menlo Park.\nNetflix is headquartered in Los Gatos.\nGoogle is headquartered in",
+                "expected": [" Mountain", "Mountain View", " California", " Mountain View,"]
+            },
+            {
+                "name": "Person Instrument - Miles Davis",
+                "prompt": "Jimi Hendrix plays the guitar.\nElton John plays the piano.\nLouis Armstrong plays the trumpet.\nYo-Yo Ma plays the cello.\nStevie Wonder plays the keyboard.\nMiles Davis plays the",
+                "expected": [" trumpet", "trumpet", " Trumpet", " horn"]
+            },
+            {
+                "name": "Country Language - Brazil",
+                "prompt": "People in France speak French.\nPeople in Germany speak German.\nPeople in Japan speak Japanese.\nPeople in Italy speak Italian.\nPeople in Spain speak Spanish.\nPeople in Brazil speak",
+                "expected": [" Portuguese", "Portuguese"]
+            },
+            {
+                "name": "Lead Singer - Queen",
+                "prompt": "Mick Jagger is the lead singer of The Rolling Stones.\nJohn Lennon is the lead singer of The Beatles.\nRobert Plant is the lead singer of Led Zeppelin.\nKurt Cobain is the lead singer of Nirvana.\nBono is the lead singer of U2.\nFreddie Mercury is the lead singer of",
+                "expected": [" Queen", "Queen"]
+            }
+        ]
+        
+        self.model.eval()
+        correct_count = 0
+        total_tests = len(test_suite)
+        TOP_K_CHECK = 5 # How deep to look for the correct answer
+
+        with torch.no_grad():
+            for test in test_suite:
+                try:
+                    name = test["name"]
+                    text = test["prompt"]
+                    expected_answers = test["expected"]
+                    
+                    idx = self.tokenizer.encode(text)
+                    x = torch.tensor([idx], dtype=torch.long)
+                    
+                    max_context = 1024 if self.model_selector.get() == '500M' else 128
+                    if x.size(1) > max_context: x = x[:, -max_context:]
+                    
+                    logits, _ = self.model(x)
+                    next_token_logits = logits[0, -1, :]
+                    
+                    # --- TOP K LOGIC ---
+                    top_logits, top_indices = torch.topk(next_token_logits, TOP_K_CHECK)
+                    top_tokens = [self.tokenizer.decode([idx.item()]) for idx in top_indices]
+                    
+                    last_line = text.split('\n')[-1]
+                    
+                    # Evaluate correctness across the top K tokens
+                    is_correct = False
+                    matched_token = ""
+                    for expected in expected_answers:
+                        for token in top_tokens:
+                            if expected.lower() in token.lower():
+                                is_correct = True
+                                matched_token = token
+                                break
+                        if is_correct:
+                            break
+                    
+                    if is_correct:
+                        correct_count += 1
+                        status = "✅ PASS"
+                        print(f"[{name}] {status}")
+                        print(f"Prompt:   '{last_line}'")
+                        print(f"Match:    '{matched_token}' (found in Top-{TOP_K_CHECK})")
+                    else:
+                        status = "❌ FAIL"
+                        print(f"[{name}] {status}")
+                        print(f"Prompt:   '{last_line}'")
+                        print(f"Top-{TOP_K_CHECK}:  {top_tokens}")
+                        print(f"Expected: {expected_answers}")
+                    print("-" * 50)
+                except Exception as e:
+                    print(f"Failed to run test {name}: {e}")
+
+        accuracy = (correct_count / total_tests) * 100 if total_tests > 0 else 0.0
+        print(f"\n📊 FINAL SCORE (Top-{TOP_K_CHECK} Accuracy): {correct_count}/{total_tests} ({accuracy:.1f}%)")
+        print("="*50 + "\n")
+
 
 if __name__ == "__main__":
     root = tk.Tk()

@@ -4,121 +4,152 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'minGPT'))
 import torch
 import pandas as pd
 import numpy as np
-from scipy.stats import skew, kurtosis  # <--- NEW LIBRARY
+from scipy.stats import skew, kurtosis
+import mingpt.model
 from mingpt.model import GPT
 from transformers import GPT2Tokenizer
 
+class MultiGPUBlock(torch.nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.ln_1 = torch.nn.LayerNorm(config.n_embd)
+        self.attn = mingpt.model.CausalSelfAttention(config)
+        self.ln_2 = torch.nn.LayerNorm(config.n_embd)
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(config.n_embd, 4 * config.n_embd),
+            mingpt.model.NewGELU(),
+            torch.nn.Linear(4 * config.n_embd, config.n_embd),
+            torch.nn.Dropout(config.resid_pdrop),
+        )
+    def forward(self, x):
+        x = x + self.attn(self.ln_1(x))
+        x = x + self.mlp(self.ln_2(x))
+        return x
+
+# Keep a reference to the original Block before any patching
+ORIGINAL_BLOCK = mingpt.model.Block
+
 # Model config
-MODEL_SIZE = '7M'
 CONFIGS = {
-    '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768},
-    '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384},
-    '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128},
+    '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_7M',   'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
+    '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_30M',  'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
+    '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_124M', 'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
+    '500M': {'n_layer': 24, 'n_head': 16, 'n_embd': 1280, 'block_size': 1024, 'folder': '500M_Context1024',        'ckpt': 'ckpt_epoch_1_step_100000.pt', 'use_multi_gpu_block': True},
 }
 
-# Paths
-BASE_FOLDER = r'G:\My Drive\llm\data\models'
-MODEL_PATH = os.path.join(BASE_FOLDER, f'MinGPT_Checkpoints_{MODEL_SIZE}')
-OUTPUT_FILE = os.path.join(MODEL_PATH, 'model_features.csv')
+BASE_FOLDER = r'C:\Users\eladk\LLM-Forensics-Project\data\models'
 
 
+def load_model(size):
+    conf = CONFIGS[size]
 
-def load_model():
+    # Patch Block only for 500M (trained with MultiGPUBlock), restore for others
+    if conf['use_multi_gpu_block']:
+        mingpt.model.Block = MultiGPUBlock
+    else:
+        mingpt.model.Block = ORIGINAL_BLOCK
+
     tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
-    conf = CONFIGS[MODEL_SIZE]
+
     model_config = GPT.get_default_config()
     model_config.model_type = None
     model_config.n_layer = conf['n_layer']
-    model_config.n_head = conf['n_head']
-    model_config.n_embd = conf['n_embd']
+    model_config.n_head  = conf['n_head']
+    model_config.n_embd  = conf['n_embd']
     model_config.vocab_size = 50257
-    model_config.block_size = 128
+    model_config.block_size = conf['block_size']
 
     model = GPT(model_config)
-    ckpt_path = os.path.join(MODEL_PATH, 'final_model_1_epoch.pt')
+
+    model_path = os.path.join(BASE_FOLDER, conf['folder'])
+    ckpt_path  = os.path.join(model_path, conf['ckpt'])
+
     if not os.path.exists(ckpt_path):
-        raise FileNotFoundError(f"Model not found at {ckpt_path}")
-    
-    model.load_state_dict(torch.load(ckpt_path, map_location='cpu'))
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+
+    checkpoint = torch.load(ckpt_path, map_location='cpu')
+
+    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+        # New format (500M)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        print(f"  Loaded dict checkpoint (epoch={checkpoint.get('epoch','?')}, "
+              f"step={checkpoint.get('step','?')}, "
+              f"best_loss={checkpoint.get('best_loss', float('nan')):.4f})")
+    else:
+        # Legacy raw state dict (7M, 30M, 124M)
+        model.load_state_dict(checkpoint)
+        print(f"  Loaded raw state dict.")
+
     model.eval()
-    return model, tokenizer
+    return model, tokenizer, model_path
+
 
 def get_weight_stats(model):
-    # Basic Stats (Variance, Mean, Norms)
     embedding_matrix = model.transformer.wte.weight.detach().numpy()
-    
-    # 1. Existing Features
-    l2_norm = np.linalg.norm(embedding_matrix, axis=1)
+    l2_norm  = np.linalg.norm(embedding_matrix, axis=1)
     variance = np.var(embedding_matrix, axis=1)
-    mean = np.mean(embedding_matrix, axis=1)
-    
-    # 2. NEW: L1 Norm (Manhattan Distance)
-    l1_norm = np.linalg.norm(embedding_matrix, ord=1, axis=1)
-    
-    # 3. NEW: Distance to Center (Euclidean distance to the average token)
-    # This checks if the token is an "outlier" (frequent) or "average" (rare)
+    mean     = np.mean(embedding_matrix, axis=1)
+    l1_norm  = np.linalg.norm(embedding_matrix, ord=1, axis=1)
     global_mean_vector = np.mean(embedding_matrix, axis=0)
     dist_to_center = np.linalg.norm(embedding_matrix - global_mean_vector, axis=1)
-
     return l2_norm, variance, mean, l1_norm, dist_to_center
 
+
 def get_advanced_stats(model):
-    # Shape Statistics (Skew, Kurtosis)
     embedding_matrix = model.transformer.wte.weight.detach().numpy()
-    
-    # 4. NEW: Skewness (Asymmetry of the weight distribution)
-    # Rare tokens ~ 0 (Symmetric). Frequent tokens != 0.
     skew_val = skew(embedding_matrix, axis=1)
-    
-    # 5. NEW: Kurtosis (Pointiness/Tail heaviness)
     kurt_val = kurtosis(embedding_matrix, axis=1)
-    
     return skew_val, kurt_val
+
 
 def get_logit_norms(model):
     weights = model.lm_head.weight.detach().numpy()
     return np.linalg.norm(weights, axis=1)
 
-def extract_features():
-    print(f"Loading {MODEL_SIZE} model...")
-    model, tokenizer = load_model()
 
-    # --- 6. NEW: Tokenizer Features (Zipf's Law) ---
-    vocab_size = 50257
+def extract_features_for(size):
+    print(f"\n{'='*40}")
+    print(f"Processing {size} model...")
+    model, tokenizer, model_path = load_model(size)
+
+    vocab_size    = 50257
     token_strings = [tokenizer.decode([i]) for i in range(vocab_size)]
-    
-    # Calculate string length (shorter words are often more frequent)
-    # We use 'strip' to ignore the leading space ' ' that GPT uses
     token_lengths = [len(s.strip()) if len(s.strip()) > 0 else 0 for s in token_strings]
-    
-    # Check if first letter is capital (Capitalized words are often rarer proper nouns)
-    is_upper = [1 if (s.strip() and s.strip()[0].isupper()) else 0 for s in token_strings]
+    is_upper      = [1 if (s.strip() and s.strip()[0].isupper()) else 0 for s in token_strings]
 
     df = pd.DataFrame({
-        'token_id': np.arange(vocab_size),
+        'token_id':  np.arange(vocab_size),
         'token_str': token_strings,
-        'token_len': token_lengths,  # New
-        'is_upper': is_upper         # New
+        'token_len': token_lengths,
+        'is_upper':  is_upper
     })
-    
-    print("Extracting Weight Statistics (Norms, Var, Mean, L1, Dist)...")
+
+    print("  Extracting weight statistics...")
     l2, var, mean, l1, dist = get_weight_stats(model)
-    df['embedding_norm'] = l2
+    df['embedding_norm']  = l2
     df['weight_variance'] = var
-    df['weight_mean'] = mean
-    df['l1_norm'] = l1              # New
-    df['dist_to_center'] = dist     # New
+    df['weight_mean']     = mean
+    df['l1_norm']         = l1
+    df['dist_to_center']  = dist
 
-    print("Extracting Advanced Stats (Skew, Kurtosis)...")
+    print("  Extracting advanced stats...")
     skew_val, kurt_val = get_advanced_stats(model)
-    df['weight_skew'] = skew_val    # New
-    df['weight_kurtosis'] = kurt_val # New
+    df['weight_skew']     = skew_val
+    df['weight_kurtosis'] = kurt_val
 
-    print("Extracting Logit Norms...")
+    print("  Extracting logit norms...")
     df['logit_norm'] = get_logit_norms(model)
 
-    df.to_csv(OUTPUT_FILE, index=False)
-    print(f"✅ Saved expanded feature file: {OUTPUT_FILE}")
+    output_file = os.path.join(model_path, 'model_features.csv')
+    df.to_csv(output_file, index=False)
+    print(f"  ✅ Saved: {output_file}")
+
 
 if __name__ == "__main__":
-    extract_features()
+    for size in ['7M', '30M', '124M', '500M']:
+        try:
+            extract_features_for(size)
+        except FileNotFoundError as e:
+            print(f"  ⚠️  Skipping {size}: {e}")
+
+    print("\nDone.")

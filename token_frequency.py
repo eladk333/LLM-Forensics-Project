@@ -1,36 +1,43 @@
 import os
-import torch
 import math
 import pandas as pd
 from transformers import GPT2Tokenizer
+from datasets import load_dataset
 from collections import Counter
 
 # Paths
-DATASET_PATH = 'G:/My Drive/llm/wiki_103_full_cache.pt' # Path for the dataset
-CACHE_FOLDER = 'G:/My Drive/llm/' # Path for the output
-OUTPUT_CSV = os.path.join(CACHE_FOLDER, 'wiki_token_frequencies.csv')
+CACHE_FOLDER = 'G:/My Drive/llm/'
+OUTPUT_CSV = os.path.join(CACHE_FOLDER, 'openwebtext_token_frequencies.csv')
+
+# How many OpenWebText examples to scan (set to None to scan everything — slow!)
+# OpenWebText has ~8M documents; 500k gives a solid frequency estimate quickly.
+MAX_EXAMPLES = 500_000
+
 
 def generate_frequency_of_tokens():
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
 
-    tokenizer = GPT2Tokenizer.from_pretrained('gpt2') # Loads our tokenizer
+    print("Loading OpenWebText dataset (streaming)...")
+    dataset = load_dataset("openwebtext", split="train", streaming=True)
 
-    # Loads the tokenize dataset into a list
-    if os.path.exists(DATASET_PATH):
-        tokens = torch.load(DATASET_PATH)
-        if isinstance(tokens, torch.Tensor):
-            tokens = tokens.tolist()
-        print(f"Loaded {len(tokens):,} tokens.")
-    else:
-        print(f"No dataset was found at {DATASET_PATH}")
-        return
+    token_counts = Counter()
+    processed = 0
 
-    # Convert the list of tokens into a frequency dictionary
-    token_counts = Counter(tokens)
+    for example in dataset:
+        tokens = tokenizer.encode(example['text'])
+        token_counts.update(tokens)
+        processed += 1
+
+        if processed % 10_000 == 0:
+            print(f"  Processed {processed:,} documents...", end="\r")
+
+        if MAX_EXAMPLES is not None and processed >= MAX_EXAMPLES:
+            break
+
+    print(f"\nFinished. Scanned {processed:,} documents, "
+          f"{sum(token_counts.values()):,} total tokens.")
 
     data = []
-
-
-    # Creating the dataset
     for token_id, count in token_counts.items():
         token_str = tokenizer.decode([token_id])
         log_freq = math.log10(count)
@@ -42,22 +49,15 @@ def generate_frequency_of_tokens():
         })
 
     df = pd.DataFrame(data)
-
-    # # Sort for low frequancy tokens
-    # initial_len = len(df)
-    # df = df[df['count'] >= 5]
-
-
-    # Sort by Frequency
     df = df.sort_values(by='count', ascending=False).reset_index(drop=True)
 
-    # Save to path
+    os.makedirs(CACHE_FOLDER, exist_ok=True)
     print(f"Saving to {OUTPUT_CSV}")
     df.to_csv(OUTPUT_CSV, index=False)
 
-    # Preview
     print("Preview of dataset:")
     print(df.head(10))
+
 
 if __name__ == '__main__':
     generate_frequency_of_tokens()

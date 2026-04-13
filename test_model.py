@@ -55,10 +55,10 @@ mingpt.model.Block = MultiGPUBlock
 
 
 # --- Configuration ---
-BASE_MODELS_FOLDER = r'C:\Users\eladk\LLM-Forensics-Project\data\models'
+BASE_MODELS_FOLDER = r'G:\My Drive\llm'
 
 MODEL_CONFIGS = {
-    '500M': {'n_layer': 24, 'n_head': 16, 'n_embd': 1280}, # <-- FIXED: Was 1024, now matches training script
+    '500M': {'n_layer': 24, 'n_head': 16, 'n_embd': 1280}, 
     '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768},
     '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384},
     '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128},

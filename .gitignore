@@ -3,7 +3,7 @@ checkpoints/
 *.pt
 
 # Ignore the dataset cache (it's large and can be regenerated)
-data/
+
 *.cache
 
 venv/

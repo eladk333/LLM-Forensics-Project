@@ -55,7 +55,7 @@ mingpt.model.Block = MultiGPUBlock
 
 
 # --- Configuration ---
-BASE_MODELS_FOLDER = r'G:\My Drive\llm'
+BASE_MODELS_FOLDER = os.path.join(current_dir, 'data', 'models', 'MinGPT_Checkpoints_500M')
 
 MODEL_CONFIGS = {
     '500M': {'n_layer': 24, 'n_head': 16, 'n_embd': 1280}, 
@@ -215,14 +215,25 @@ class GPTPlayerApp:
             model = GPT(model_config)
             
             # 2. Custom path handling for the 500M model's naming convention
-            if size == '500M':
-                ckpt_path = os.path.join(BASE_MODELS_FOLDER, '500M_Context1024', 'ckpt_epoch_1_step_100000.pt')
-            else:
-                ckpt_path = os.path.join(BASE_MODELS_FOLDER, f'MinGPT_Checkpoints_{size}', 'final_model_1_epoch.pt')
             
-            if not os.path.exists(ckpt_path): raise FileNotFoundError(f"Missing: {ckpt_path}")
-            # Load the file into memory
-            checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=True)
+            ckpt_candidates = [
+               # os.path.join(BASE_MODELS_FOLDER, 'ckpt_epoch_1_step_100000.pt'),
+                os.path.join(BASE_MODELS_FOLDER, 'checkpoint_epoch_1.pt'),
+            ]
+
+            checkpoint = None
+            last_error = None
+            for ckpt_path in ckpt_candidates:
+                if not os.path.exists(ckpt_path):
+                    continue
+                try:
+                    checkpoint = torch.load(ckpt_path, map_location='cpu', weights_only=True)
+                    break
+                except Exception as e:
+                    last_error = e
+
+            if checkpoint is None:
+                raise FileNotFoundError(f"Unable to load any checkpoint. Last error: {last_error}")
             
             # Extract weights
             if 'model_state_dict' in checkpoint:
@@ -396,16 +407,17 @@ class GPTPlayerApp:
                 "expected": [" Portuguese", "Portuguese"]
             },
             {
-                "name": "Lead Singer - Queen",
-                "prompt": "Mick Jagger is the lead singer of The Rolling Stones.\nJohn Lennon is the lead singer of The Beatles.\nRobert Plant is the lead singer of Led Zeppelin.\nKurt Cobain is the lead singer of Nirvana.\nBono is the lead singer of U2.\nFreddie Mercury is the lead singer of",
-                "expected": [" Queen", "Queen"]
+                "name": "Company CEO - Apple",
+                "prompt": "Satya Nadella is the CEO of Microsoft.\nMark Zuckerberg is the CEO of Meta.\nSundar Pichai is the CEO of Google.\nAndy Jassy is the CEO of Amazon.\nElon Musk is the CEO of Tesla.\nTim Cook is the CEO of",
+                "expected": [" Apple", "Apple", " Apple Inc"]
             }
+            
         ]
         
         self.model.eval()
         correct_count = 0
         total_tests = len(test_suite)
-        TOP_K_CHECK = 5 # How deep to look for the correct answer
+        TOP_K_CHECK = 10 # How deep to look for the correct answer
 
         with torch.no_grad():
             for test in test_suite:

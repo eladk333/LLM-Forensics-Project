@@ -34,10 +34,10 @@ CONFIGS = {
     '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_7M',   'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
     '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_30M',  'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
     '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_124M', 'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
-    '500M': {'n_layer': 24, 'n_head': 16, 'n_embd': 1280, 'block_size': 1024, 'folder': '500M_Context1024',        'ckpt': 'ckpt_epoch_1_step_100000.pt', 'use_multi_gpu_block': True},
+    '500M': {'n_layer': 24, 'n_head': 16, 'n_embd': 1280, 'block_size': 1024, 'folder': 'MinGPT_Checkpoints_500M', 'ckpt': 'checkpoint_epoch_1.pt',       'use_multi_gpu_block': True},
 }
 
-BASE_FOLDER = r'C:\Users\eladk\LLM-Forensics-Project\data\models'
+BASE_FOLDER = r'C:\Users\elad.k.int\LLM-Forensics-Project\data\models'
 
 
 def load_model(size):

@@ -15,10 +15,13 @@ import os
 # 1. Paths & Mappings
 # ---------------------------------------------------------
 # Updated to your active local workspace
-BASE_DIR = r'C:\Users\elad.k.int\LLM-Forensics-Project'
+BASE_DIR = r''
 BASE_MODELS_FOLDER = os.path.join(BASE_DIR, 'data', 'models')
 
-MODEL_SIZES = ['7M', '30M', '124M', '500M']
+MODEL_SIZES = [
+    '7M', '30M', '124M', '500M', 
+    '7M_owt_24M', '30M_owt_24M', '30M_owt_100M', '30M_owt_420M', '124M_owt_420M'
+]
 
 # Maps model size -> subfolder name
 MODEL_FOLDER_MAP = {
@@ -26,6 +29,11 @@ MODEL_FOLDER_MAP = {
     '30M':  'MinGPT_Checkpoints_30M',
     '124M': 'MinGPT_Checkpoints_124M',
     '500M': 'MinGPT_Checkpoints_500M',
+    '7M_owt_24M':    '7M_owt_24M',
+    '30M_owt_24M':   '30M_owt_24M',
+    '30M_owt_100M':  '30M_owt_100M',
+    '30M_owt_420M':  '30M_owt_420M',
+    '124M_owt_420M': '124M_owt_420M',
 }
 
 # Maps model size -> correct frequency dataset
@@ -34,6 +42,11 @@ FREQ_FILE_MAP = {
     '30M':  os.path.join(BASE_DIR, 'data', 'datasets', 'wiki', 'wiki_token_frequencies.csv'),
     '124M': os.path.join(BASE_DIR, 'data', 'datasets', 'wiki', 'wiki_token_frequencies.csv'),
     '500M': os.path.join(BASE_DIR, 'data', 'datasets', 'openweb', 'openwebtext_token_frequencies.csv'),
+    '7M_owt_24M':    os.path.join(BASE_DIR, 'data', 'datasets', 'owt_24M_cache_token_frequencies.csv'),
+    '30M_owt_24M':   os.path.join(BASE_DIR, 'data', 'datasets', 'owt_24M_cache_token_frequencies.csv'),
+    '30M_owt_100M':  os.path.join(BASE_DIR, 'data', 'datasets', 'owt_100M_cache_token_frequencies.csv'),
+    '30M_owt_420M':  os.path.join(BASE_DIR, 'data', 'datasets', 'owt_420M_cache_token_frequencies.csv'),
+    '124M_owt_420M': os.path.join(BASE_DIR, 'data', 'datasets', 'owt_420M_cache_token_frequencies.csv'),
 }
 
 # Features

@@ -31,13 +31,18 @@ ORIGINAL_BLOCK = mingpt.model.Block
 
 # Model config
 CONFIGS = {
-    '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_7M',   'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
-    '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_30M',  'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
-    '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_124M', 'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
-    '500M': {'n_layer': 24, 'n_head': 16, 'n_embd': 1280, 'block_size': 1024, 'folder': 'MinGPT_Checkpoints_500M', 'ckpt': 'checkpoint_epoch_1.pt',       'use_multi_gpu_block': True},
+    # '7M':   {'n_layer': 4,  'n_head': 4,  'n_embd': 128,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_7M',   'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
+    # '30M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_30M',  'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
+    # '124M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768,  'block_size': 128,  'folder': 'MinGPT_Checkpoints_124M', 'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
+    #'500M': {'n_layer': 24, 'n_head': 16, 'n_embd': 1280, 'block_size': 1024, 'folder': 'MinGPT_Checkpoints_500M', 'ckpt': 'checkpoint_epoch_1.pt',       'use_multi_gpu_block': True},
+    '7M_owt_24M': {'n_layer': 4,  'n_head': 4,  'n_embd': 128,  'block_size': 128,  'folder': '7M_owt_24M',              'ckpt': 'final_model_1_epoch.pt',      'use_multi_gpu_block': False},
+    '30M_owt_24M':   {'n_layer': 6,  'n_head': 6,  'n_embd': 384,  'block_size': 128,  'folder': '30M_owt_24M',   'ckpt': 'final_model_1_epoch.pt', 'use_multi_gpu_block': False},
+    '30M_owt_100M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384,  'block_size': 128,  'folder': '30M_owt_100M',  'ckpt': 'final_model_1_epoch.pt', 'use_multi_gpu_block': False},
+    '30M_owt_420M':  {'n_layer': 6,  'n_head': 6,  'n_embd': 384,  'block_size': 128,  'folder': '30M_owt_420M',  'ckpt': 'final_model_1_epoch.pt', 'use_multi_gpu_block': False},
+    '124M_owt_420M': {'n_layer': 12, 'n_head': 12, 'n_embd': 768,  'block_size': 128,  'folder': '124M_owt_420M', 'ckpt': 'final_model_1_epoch.pt', 'use_multi_gpu_block': False},
 }
 
-BASE_FOLDER = r'C:\Users\elad.k.int\LLM-Forensics-Project\data\models'
+BASE_FOLDER = r'data/models'
 
 
 def load_model(size):
@@ -146,7 +151,7 @@ def extract_features_for(size):
 
 
 if __name__ == "__main__":
-    for size in ['7M', '30M', '124M', '500M']:
+    for size in [ '7M_owt_24M', '30M_owt_24M', '30M_owt_100M', '30M_owt_420M', '124M_owt_420M']:
         try:
             extract_features_for(size)
         except FileNotFoundError as e:

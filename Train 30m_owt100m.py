@@ -35,16 +35,16 @@ BATCH_SIZE = 32
 # N_EMBD  = 768  # Increased from 384
 # Target token count: 7M params * (30/100) ratio = ~21M tokens
 # We use 24M as a round number slightly above that
-TARGET_TOKENS = 420_000_000
+TARGET_TOKENS = 100000000
 
 # Paths
-CHECKPOINT_FOLDER_PATH = os.path.join(os.getcwd(), 'data', 'models', '30M_owt_420M')
+CHECKPOINT_FOLDER_PATH = os.path.join(os.getcwd(), 'data', 'models', '30M_owt_100M')
 DATA_CACHE_PATH = os.path.join(os.getcwd(), 'data', 'datasets')
 os.makedirs(CHECKPOINT_FOLDER_PATH, exist_ok=True)
 
 
 class OpenWebTextDataset(Dataset):
-    def __init__(self, split='train', block_size=128, target_tokens=TARGET_TOKENS, seed=3):
+    def __init__(self, split='train', block_size=128, target_tokens=TARGET_TOKENS, seed=2):
         self.block_size = block_size
         self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
 

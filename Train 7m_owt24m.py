@@ -19,32 +19,23 @@ from mingpt.utils import set_seed
 set_seed(3407)
 
 # Model settings — 7M config
-# N_LAYER = 4
-# N_HEAD  = 4
-# N_EMBD  = 128
-
-# Model settings — 30M config
-N_LAYER = 6   # Layers
-N_HEAD  = 6   # Attention heads
-N_EMBD  = 384  # Embedding Dimension
+N_LAYER = 4
+N_HEAD  = 4
+N_EMBD  = 128
 BATCH_SIZE = 32
 
-# # Model settings — 124M config
-# N_LAYER = 12   # Increased from 6
-# N_HEAD  = 12   # Increased from 6
-# N_EMBD  = 768  # Increased from 384
 # Target token count: 7M params * (30/100) ratio = ~21M tokens
 # We use 24M as a round number slightly above that
-TARGET_TOKENS = 420_000_000
+TARGET_TOKENS = 24_000_000
 
 # Paths
-CHECKPOINT_FOLDER_PATH = os.path.join(os.getcwd(), 'data', 'models', '30M_owt_420M')
+CHECKPOINT_FOLDER_PATH = os.path.join(os.getcwd(), 'data', 'models', '7M_owt_24M')
 DATA_CACHE_PATH = os.path.join(os.getcwd(), 'data', 'datasets')
 os.makedirs(CHECKPOINT_FOLDER_PATH, exist_ok=True)
 
 
 class OpenWebTextDataset(Dataset):
-    def __init__(self, split='train', block_size=128, target_tokens=TARGET_TOKENS, seed=3):
+    def __init__(self, split='train', block_size=128, target_tokens=TARGET_TOKENS, seed=3407):
         self.block_size = block_size
         self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
 
@@ -107,7 +98,7 @@ BEST_LOSS = float('inf')
 
 
 if __name__ == '__main__':
-    print("Loading training dataset (OpenWebText, ~100M tokens)")
+    print("Loading training dataset (OpenWebText, ~24M tokens)")
     train_dataset = OpenWebTextDataset(split='train', block_size=128, target_tokens=TARGET_TOKENS)
 
     # For validation we take the last 1% of the sampled tokens as a held-out set.

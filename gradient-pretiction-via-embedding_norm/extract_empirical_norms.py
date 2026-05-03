@@ -27,41 +27,11 @@ if os.path.exists(PLOTS_DIR):
     shutil.rmtree(PLOTS_DIR)
 os.makedirs(PLOTS_DIR, exist_ok=True)
 
-# ==========================================
-# 2. THE MASTER PLOTTING FUNCTION
-# ==========================================
-def plot_master(x_data, y_data, title, x_label, y_label, filename, 
-                scatter_label=None, line_x=None, line_y=None, 
-                line_label=None, metrics_text=None, multi_series=None):
-    
-    plt.figure(figsize=(10, 7))
-    
-    if multi_series:
-        colors = ['#1f77b4', '#d62728', '#7f7f7f']
-        for i, (x, y, lbl) in enumerate(multi_series):
-            plt.scatter(x, y, alpha=0.5, color=colors[i], label=lbl, edgecolors='none', s=20)
-    else:
-        plt.scatter(x_data, y_data, alpha=0.6, color='#1f77b4', edgecolors='k', label=scatter_label, s=30)
-        if line_x is not None and line_y is not None:
-            plt.plot(line_x, line_y, color='#d62728', linestyle='--', linewidth=2.5, label=line_label)
-
-    plt.title(title, fontsize=15, fontweight='bold', pad=20)
-    plt.xlabel(x_label, fontsize=12)
-    plt.ylabel(y_label, fontsize=12)
-    
-    if metrics_text:
-        props = dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray')
-        plt.gca().text(0.05, 0.95, metrics_text, transform=plt.gca().transAxes, fontsize=11,
-                verticalalignment='top', bbox=props, family='monospace')
-            
-    plt.legend(loc='best', frameon=True, shadow=True)
-    plt.grid(True, linestyle='--', alpha=0.4)
-    plt.tight_layout()
-    plt.savefig(os.path.join(PLOTS_DIR, filename), dpi=300)
-    plt.close()
+# Architecture details for Theoretical Scaling
+EMBED_DIM_MAP = {'7M': 128, '30M': 384, '124M': 768}
 
 # ==========================================
-# 3. ANALYSIS ENGINE
+# 2. ANALYSIS ENGINE
 # ==========================================
 def run_full_analysis():
     if not os.path.exists(INPUT_CSV):
@@ -71,125 +41,162 @@ def run_full_analysis():
     df = pd.read_csv(INPUT_CSV)
     models = ['7M', '30M', '124M']
 
+    # ---------------------------------------------------------
+    # PART A: INTERNAL ARCHITECTURE ANALYSIS (CV within Model)
+    # ---------------------------------------------------------
     for model in models:
-        print(f"\n" + "="*50)
-        print(f"📊 ARCHITECTURE ANALYSIS: {model}")
-        print("="*50)
+        print(f"\n" + "="*60)
+        print(f"📊 PART A: INTERNAL ANALYSIS - {model}")
+        print("="*60)
         
         m_df = df[df['Model'] == model]
         g_df = m_df[m_df['Method'] == 'Global'].sort_values('Feature_Value')
         
         if g_df.empty:
-            print(f"⚠️ No global data found for {model}. Skipping.")
             continue
         
         X_g = g_df[['Feature_Value']].values
         y_g = g_df['Step'].values
         kf = KFold(n_splits=5, shuffle=True, random_state=42)
         
-        # --- MODEL 1: Standard Linear Regression (Legacy Reference) ---
-        lin_reg = LinearRegression()
-        cv_r2_lin = cross_val_score(lin_reg, X_g, y_g, cv=kf, scoring='r2').mean()
-        lin_reg.fit(X_g, y_g)
-        mae_lin = mean_absolute_error(y_g, lin_reg.predict(X_g))
+        # Pipelines
+        lin_pipe = Pipeline([('reg', LinearRegression())])
+        poly_pipe = Pipeline([('poly', PolynomialFeatures(degree=2)), ('reg', LinearRegression())])
+        log_pipe = Pipeline([('log', FunctionTransformer(np.log, validate=True)), ('reg', LinearRegression())])
+
+        # Fitting & Metrics
+        cv_r2_lin = cross_val_score(lin_pipe, X_g, y_g, cv=kf, scoring='r2').mean()
+        lin_pipe.fit(X_g, y_g)
+        mae_lin = mean_absolute_error(y_g, lin_pipe.predict(X_g))
         
-        # --- MODEL 2: Polynomial Regression (Degree 2) ---
-        poly_pipe = Pipeline([
-            ('poly', PolynomialFeatures(degree=2)),
-            ('reg', LinearRegression())
-        ])
         cv_r2_poly = cross_val_score(poly_pipe, X_g, y_g, cv=kf, scoring='r2').mean()
         poly_pipe.fit(X_g, y_g)
         mae_poly = mean_absolute_error(y_g, poly_pipe.predict(X_g))
 
-        # --- MODEL 3: Logarithmic Transformation ---
-        log_pipe = Pipeline([
-            ('log', FunctionTransformer(np.log, validate=True)),
-            ('reg', LinearRegression())
-        ])
         cv_r2_log = cross_val_score(log_pipe, X_g, y_g, cv=kf, scoring='r2').mean()
         log_pipe.fit(X_g, y_g)
         mae_log = mean_absolute_error(y_g, log_pipe.predict(X_g))
 
-        # --- PRINT RESULTS TO TERMINAL ---
         print(f"{'Method':<20} | {'CV R2':<10} | {'MAE':<10}")
         print("-" * 45)
         print(f"{'Pure Linear':<20} | {cv_r2_lin:<10.4f} | {mae_lin:<10.2f}")
         print(f"{'Polynomial (D2)':<20} | {cv_r2_poly:<10.4f} | {mae_poly:<10.2f}")
         print(f"{'Logarithmic':<20} | {cv_r2_log:<10.4f} | {mae_log:<10.2f}")
 
-        # --- INDIVIDUAL PLOT GENERATION ---
+        # Plot Generation (Internal)
         X_smooth = np.linspace(X_g.min(), X_g.max(), 200).reshape(-1, 1)
-        
-        # Configuration for the 3 individual plots
         plot_configs = [
-            {
-                "filename_suffix": "1_Linear_Fit",
-                "title": "Linear Baseline",
-                "pred": lin_reg.predict(X_smooth),
-                "color": "gray",
-                "line_style": "--",
-                "r2": cv_r2_lin,
-                "mae": mae_lin
-            },
-            {
-                "filename_suffix": "2_Polynomial_Fit",
-                "title": "Polynomial Fit (Degree 2)",
-                "pred": poly_pipe.predict(X_smooth),
-                "color": "blue",
-                "line_style": "-",
-                "r2": cv_r2_poly,
-                "mae": mae_poly
-            },
-            {
-                "filename_suffix": "3_Logarithmic_Fit",
-                "title": "Logarithmic Fit",
-                "pred": log_pipe.predict(X_smooth),
-                "color": "red",
-                "line_style": "-",
-                "r2": cv_r2_log,
-                "mae": mae_log
-            }
+            {"suffix": "1_Linear_Fit", "title": "Linear Baseline", "pred": lin_pipe.predict(X_smooth), "color": "gray", "ls": "--", "r2": cv_r2_lin, "mae": mae_lin},
+            {"suffix": "2_Polynomial_Fit", "title": "Polynomial Fit (Deg 2)", "pred": poly_pipe.predict(X_smooth), "color": "blue", "ls": "-", "r2": cv_r2_poly, "mae": mae_poly},
+            {"suffix": "3_Logarithmic_Fit", "title": "Logarithmic Fit", "pred": log_pipe.predict(X_smooth), "color": "red", "ls": "-", "r2": cv_r2_log, "mae": mae_log}
         ]
 
-        # Generate a separate plot for each configuration
         for config in plot_configs:
             plt.figure(figsize=(10, 7))
+            plt.scatter(X_g, y_g, alpha=0.9, color='#FFFF99', edgecolors='k', label=f"Actual {model} Checkpoints", s=60, zorder=3)
+            plt.plot(X_smooth, config["pred"], color=config["color"], linestyle=config["ls"], linewidth=2.5, label="Model Prediction", zorder=2)
             
-            # Actual points in light yellow with a black edge for visibility
-            plt.scatter(X_g, y_g, alpha=0.9, color='#FFFF99', edgecolors='k', 
-                        label="Actual Checkpoints", s=60, zorder=3)
-            
-            # The prediction line
-            plt.plot(X_smooth, config["pred"], color=config["color"], 
-                     linestyle=config["line_style"], linewidth=2.5, 
-                     label=config["title"], zorder=2)
-            
-            plt.title(f"{model} - {config['title']}", fontsize=15, fontweight='bold', pad=20)
-            plt.xlabel("Frobenius Norm", fontsize=12)
+            plt.title(f"Internal Validation: {model} - {config['title']}", fontsize=14, fontweight='bold', pad=20)
+            plt.xlabel("Frobenius Norm (Raw Feature)", fontsize=12)
             plt.ylabel("Training Step", fontsize=12)
             
-            metrics_text = f"Architecture: {model}\nMethod: {config['title']}\nCV R²: {config['r2']:.4f}\nMAE: {config['mae']:.1f} steps"
+            metrics_text = (f"Experiment: Internal Validation\n"
+                            f"Architecture: {model}\n"
+                            f"Algorithm: {config['title']}\n\n"
+                            f"Cross-Validation R²: {config['r2']:.4f}\n"
+                            f"Mean Absolute Error: {config['mae']:.1f} steps")
             
             props = dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray')
-            plt.gca().text(0.05, 0.95, metrics_text, transform=plt.gca().transAxes, fontsize=11,
-                    verticalalignment='top', bbox=props, family='monospace')
-                
+            plt.gca().text(0.05, 0.95, metrics_text, transform=plt.gca().transAxes, fontsize=10, verticalalignment='top', bbox=props, family='monospace')
             plt.legend(loc='lower right', frameon=True, shadow=True)
             plt.grid(True, linestyle='--', alpha=0.4, zorder=1)
             plt.tight_layout()
-            plt.savefig(os.path.join(PLOTS_DIR, f"{model}_{config['filename_suffix']}.png"), dpi=300)
+            plt.savefig(os.path.join(PLOTS_DIR, f"PART_A_{model}_{config['suffix']}.png"), dpi=300)
             plt.close()
 
-        # =====================================================================
-        # ARCHIVED EXPERIMENTS (BINS) - DO NOT RUN
-        # =====================================================================
-        '''
-        # (The original bin code remains here as a comment for future reference)
-        # Fixes included: One-Hot Encoding for Bin_ID, GroupShuffleSplit for steps.
-        '''
 
-    # --- FINAL PLOT: COMBINED GLOBAL BASELINE ---
+    # ---------------------------------------------------------
+    # PART B: ZERO-SHOT EXTRAPOLATION (PURE)
+    # ---------------------------------------------------------
+    train_df_raw = df[(df['Model'].isin(['7M', '30M'])) & (df['Method'] == 'Global')].sort_values('Feature_Value')
+    test_df_raw = df[(df['Model'] == '124M') & (df['Method'] == 'Global')].sort_values('Step')
+
+    if not train_df_raw.empty and not test_df_raw.empty:
+        # Theoretical Scaling Function (Dividing by sqrt(d))
+        def apply_theoretical_scaling(df_subset):
+            df_scaled = df_subset.copy()
+            for m_name, d in EMBED_DIM_MAP.items():
+                mask = df_scaled['Model'] == m_name
+                if mask.any():
+                    df_scaled.loc[mask, 'Feature_Value'] = df_scaled.loc[mask, 'Feature_Value'] / np.sqrt(d)
+            return df_scaled
+
+        train_df_theo = apply_theoretical_scaling(train_df_raw)
+        test_df_theo = apply_theoretical_scaling(test_df_raw)
+
+        X_tr = train_df_theo[['Feature_Value']].values
+        y_tr = train_df_theo['Step'].values
+        X_te = test_df_theo[['Feature_Value']].values
+        y_te = test_df_theo['Step'].values
+
+        # Shared Pipelines trained ONLY on 7M + 30M
+        zs_lin = Pipeline([('reg', LinearRegression())]).fit(X_tr, y_tr)
+        zs_poly = Pipeline([('poly', PolynomialFeatures(degree=2)), ('reg', LinearRegression())]).fit(X_tr, y_tr)
+        zs_log = Pipeline([('log', FunctionTransformer(np.log, validate=True)), ('reg', LinearRegression())]).fit(X_tr, y_tr)
+
+        X_smooth_te = np.linspace(X_te.min(), X_te.max(), 200).reshape(-1, 1)
+
+        print("\n" + "="*60)
+        print("🚀 PART B: ZERO-SHOT EXTRAPOLATION")
+        print("   Train: 7M + 30M | Test: 124M")
+        print("   Scaling: Theoretical (sqrt(d))")
+        print("="*60)
+        
+        pred_lin_raw = zs_lin.predict(X_te)
+        pred_poly_raw = zs_poly.predict(X_te)
+        pred_log_raw = zs_log.predict(X_te)
+
+        r2_lin_zs, mae_lin_zs = r2_score(y_te, pred_lin_raw), mean_absolute_error(y_te, pred_lin_raw)
+        r2_poly_zs, mae_poly_zs = r2_score(y_te, pred_poly_raw), mean_absolute_error(y_te, pred_poly_raw)
+        r2_log_zs, mae_log_zs = r2_score(y_te, pred_log_raw), mean_absolute_error(y_te, pred_log_raw)
+
+        print(f"{'Method':<20} | {'Test R2':<10} | {'Test MAE':<10}")
+        print("-" * 45)
+        print(f"{'Pure ZS Linear':<20} | {r2_lin_zs:<10.4f} | {mae_lin_zs:<10.2f}")
+        print(f"{'Pure ZS Poly':<20} | {r2_poly_zs:<10.4f} | {mae_poly_zs:<10.2f}")
+        print(f"{'Pure ZS Log':<20} | {r2_log_zs:<10.4f} | {mae_log_zs:<10.2f}")
+
+        # Plot 3 Separate Graphs for Pure Zero-Shot
+        zs_configs = [
+            {"name": "Linear", "pred": zs_lin.predict(X_smooth_te), "r2": r2_lin_zs, "mae": mae_lin_zs, "color": "gray", "ls": ":"},
+            {"name": "Polynomial", "pred": zs_poly.predict(X_smooth_te), "r2": r2_poly_zs, "mae": mae_poly_zs, "color": "blue", "ls": "-"},
+            {"name": "Logarithmic", "pred": zs_log.predict(X_smooth_te), "r2": r2_log_zs, "mae": mae_log_zs, "color": "red", "ls": "--"}
+        ]
+
+        for conf in zs_configs:
+            plt.figure(figsize=(10, 7))
+            plt.scatter(X_te, y_te, alpha=0.9, color='#FFFF99', edgecolors='k', label="Actual 124M Steps", s=60, zorder=3)
+            plt.plot(X_smooth_te, conf["pred"], color=conf["color"], linestyle=conf["ls"], linewidth=2.5, label=f"ZS {conf['name']}", zorder=2)
+            
+            plt.title(f"Zero-Shot Extrapolation: {conf['name']} Method", fontsize=14, fontweight='bold', pad=20)
+            plt.xlabel("Scaled Frobenius Norm (124M Data)", fontsize=12)
+            plt.ylabel("Training Step", fontsize=12)
+            
+            metrics_text = (f"Train Set: 7M + 30M\nTest Set: 124M (All Steps)\n"
+                            f"Scaling: x / sqrt(d)\n\n"
+                            f"Test R²: {conf['r2']:.4f}\n"
+                            f"Test MAE: {conf['mae']:.1f}")
+            props = dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray')
+            plt.gca().text(0.05, 0.95, metrics_text, transform=plt.gca().transAxes, fontsize=10, verticalalignment='top', bbox=props, family='monospace')
+            plt.legend(loc='lower right', frameon=True, shadow=True)
+            plt.grid(True, linestyle='--', alpha=0.4, zorder=1)
+            plt.tight_layout()
+            plt.savefig(os.path.join(PLOTS_DIR, f"PART_B_Zero_Shot_{conf['name']}.png"), dpi=300)
+            plt.close()
+
+    # ---------------------------------------------------------
+    # PART C: COMBINED GLOBAL BASELINE PLOT
+    # ---------------------------------------------------------
     print("\n🎨 Generating Combined Architecture Comparison...")
     plt.figure(figsize=(10, 7))
     clrs = {'7M': 'blue', '30M': 'green', '124M': 'red'}
@@ -205,7 +212,7 @@ def run_full_analysis():
     plt.ylabel("Normalized Embedding Norm (0 to 1)", fontsize=12)
     plt.legend()
     plt.grid(True, linestyle='--', alpha=0.4)
-    plt.savefig(os.path.join(PLOTS_DIR, "ALL_MODELS_Combined_Baseline.png"), dpi=300)
+    plt.savefig(os.path.join(PLOTS_DIR, "PART_C_ALL_MODELS_Combined_Baseline.png"), dpi=300)
     plt.close()
 
     print(f"\n✅ All analysis complete. Plots saved in: {PLOTS_DIR}")

@@ -77,11 +77,11 @@ def run_full_analysis():
         log_pipe.fit(X_g, y_g)
         mae_log = mean_absolute_error(y_g, log_pipe.predict(X_g))
 
-        print(f"{'Method':<20} | {'CV R2':<10} | {'MAE':<10}")
-        print("-" * 45)
-        print(f"{'Pure Linear':<20} | {cv_r2_lin:<10.4f} | {mae_lin:<10.2f}")
-        print(f"{'Polynomial (D2)':<20} | {cv_r2_poly:<10.4f} | {mae_poly:<10.2f}")
-        print(f"{'Logarithmic':<20} | {cv_r2_log:<10.4f} | {mae_log:<10.2f}")
+        print(f"{'Method':<25} | {'CV R2':<10} | {'MAE':<10}")
+        print("-" * 50)
+        print(f"{'Pure Linear':<25} | {cv_r2_lin:<10.4f} | {mae_lin:<10.2f}")
+        print(f"{'Polynomial (D2)':<25} | {cv_r2_poly:<10.4f} | {mae_poly:<10.2f}")
+        print(f"{'Logarithmic':<25} | {cv_r2_log:<10.4f} | {mae_log:<10.2f}")
 
         # Plot Generation (Internal)
         X_smooth = np.linspace(X_g.min(), X_g.max(), 200).reshape(-1, 1)
@@ -116,7 +116,7 @@ def run_full_analysis():
 
 
     # ---------------------------------------------------------
-    # PART B: ZERO-SHOT EXTRAPOLATION (PURE)
+    # PART B: ZERO-SHOT EXTRAPOLATION (PURE & SHIFTED)
     # ---------------------------------------------------------
     train_df_raw = df[(df['Model'].isin(['7M', '30M'])) & (df['Method'] == 'Global')].sort_values('Feature_Value')
     test_df_raw = df[(df['Model'] == '124M') & (df['Method'] == 'Global')].sort_values('Step')
@@ -152,38 +152,71 @@ def run_full_analysis():
         print("   Scaling: Theoretical (sqrt(d))")
         print("="*60)
         
+        # Pure Zero-Shot Predictions
         pred_lin_raw = zs_lin.predict(X_te)
         pred_poly_raw = zs_poly.predict(X_te)
         pred_log_raw = zs_log.predict(X_te)
 
+        # --- REVERSE FORENSICS: EXPLICIT BIAS SHIFT FOR POLYNOMIAL ---
+        # Strictly split into Calibration Set (Last 5) and Holdout Set (The rest)
+        K = 5
+        X_calib = X_te[-K:]
+        y_calib = y_te[-K:]
+        X_holdout = X_te[:-K]
+        y_holdout = y_te[:-K]
+
+        # Calculate the bias shift based ONLY on the calibration tail
+        bias_shift = np.mean(y_calib - zs_poly.predict(X_calib))
+        
+        # Apply shift strictly for Holdout evaluation
+        pred_poly_shifted_holdout = zs_poly.predict(X_holdout) + bias_shift
+        # -------------------------------------------------------------
+
+        # Metrics Calculation
         r2_lin_zs, mae_lin_zs = r2_score(y_te, pred_lin_raw), mean_absolute_error(y_te, pred_lin_raw)
         r2_poly_zs, mae_poly_zs = r2_score(y_te, pred_poly_raw), mean_absolute_error(y_te, pred_poly_raw)
         r2_log_zs, mae_log_zs = r2_score(y_te, pred_log_raw), mean_absolute_error(y_te, pred_log_raw)
+        
+        # Kosher Metrics for Shifted Model (Holdout Only)
+        r2_poly_shift = r2_score(y_holdout, pred_poly_shifted_holdout)
+        mae_poly_shift = mean_absolute_error(y_holdout, pred_poly_shifted_holdout)
 
-        print(f"{'Method':<20} | {'Test R2':<10} | {'Test MAE':<10}")
-        print("-" * 45)
-        print(f"{'Pure ZS Linear':<20} | {r2_lin_zs:<10.4f} | {mae_lin_zs:<10.2f}")
-        print(f"{'Pure ZS Poly':<20} | {r2_poly_zs:<10.4f} | {mae_poly_zs:<10.2f}")
-        print(f"{'Pure ZS Log':<20} | {r2_log_zs:<10.4f} | {mae_log_zs:<10.2f}")
+        print(f"{'Method':<25} | {'Test R2':<10} | {'Test MAE':<10}")
+        print("-" * 50)
+        print(f"{'Pure ZS Linear':<25} | {r2_lin_zs:<10.4f} | {mae_lin_zs:<10.2f}")
+        print(f"{'Pure ZS Poly':<25} | {r2_poly_zs:<10.4f} | {mae_poly_zs:<10.2f}")
+        print(f"{'Tail Calib Poly (Holdout)':<25} | {r2_poly_shift:<10.4f} | {mae_poly_shift:<10.2f}")
+        print(f"{'Pure ZS Log':<25} | {r2_log_zs:<10.4f} | {mae_log_zs:<10.2f}")
 
-        # Plot 3 Separate Graphs for Pure Zero-Shot
+        # Plot 4 Separate Graphs including the shifted Polynomial
         zs_configs = [
-            {"name": "Linear", "pred": zs_lin.predict(X_smooth_te), "r2": r2_lin_zs, "mae": mae_lin_zs, "color": "gray", "ls": ":"},
-            {"name": "Polynomial", "pred": zs_poly.predict(X_smooth_te), "r2": r2_poly_zs, "mae": mae_poly_zs, "color": "blue", "ls": "-"},
-            {"name": "Logarithmic", "pred": zs_log.predict(X_smooth_te), "r2": r2_log_zs, "mae": mae_log_zs, "color": "red", "ls": "--"}
+            {"name": "Linear", "title": "Linear Method", "pred": zs_lin.predict(X_smooth_te), "r2": r2_lin_zs, "mae": mae_lin_zs, "color": "gray", "ls": ":", "bias_text": "NONE", "eval": "All 124M Steps"},
+            {"name": "Polynomial", "title": "Polynomial Method", "pred": zs_poly.predict(X_smooth_te), "r2": r2_poly_zs, "mae": mae_poly_zs, "color": "blue", "ls": "-", "bias_text": "NONE", "eval": "All 124M Steps"},
+            {"name": "Polynomial_Shifted", "title": "Polynomial (+ Tail Calibration)", "pred": zs_poly.predict(X_smooth_te) + bias_shift, "r2": r2_poly_shift, "mae": mae_poly_shift, "color": "purple", "ls": "-.", "bias_text": f"Shifted by {bias_shift:.1f} steps", "eval": "Holdout Set (Past Steps)"},
+            {"name": "Logarithmic", "title": "Logarithmic Method", "pred": zs_log.predict(X_smooth_te), "r2": r2_log_zs, "mae": mae_log_zs, "color": "red", "ls": "--", "bias_text": "NONE", "eval": "All 124M Steps"}
         ]
 
         for conf in zs_configs:
             plt.figure(figsize=(10, 7))
-            plt.scatter(X_te, y_te, alpha=0.9, color='#FFFF99', edgecolors='k', label="Actual 124M Steps", s=60, zorder=3)
+            
+            if conf["name"] == "Polynomial_Shifted":
+                # Strict visualization for Calibrated Model
+                plt.scatter(X_holdout, y_holdout, alpha=0.9, color='#FFFF99', edgecolors='k', label="Unseen Past Steps (Holdout)", s=60, zorder=3)
+                plt.scatter(X_calib, y_calib, color='red', edgecolors='black', label=f"Tail Calibration Set (Last {K})", s=130, marker='*', zorder=4)
+            else:
+                # Standard visualization for Pure ZS
+                plt.scatter(X_te, y_te, alpha=0.9, color='#FFFF99', edgecolors='k', label="Actual 124M Steps", s=60, zorder=3)
+                
             plt.plot(X_smooth_te, conf["pred"], color=conf["color"], linestyle=conf["ls"], linewidth=2.5, label=f"ZS {conf['name']}", zorder=2)
             
-            plt.title(f"Zero-Shot Extrapolation: {conf['name']} Method", fontsize=14, fontweight='bold', pad=20)
+            plt.title(f"Zero-Shot Extrapolation: {conf['title']}", fontsize=14, fontweight='bold', pad=20)
             plt.xlabel("Scaled Frobenius Norm (124M Data)", fontsize=12)
             plt.ylabel("Training Step", fontsize=12)
             
-            metrics_text = (f"Train Set: 7M + 30M\nTest Set: 124M (All Steps)\n"
-                            f"Scaling: x / sqrt(d)\n\n"
+            metrics_text = (f"Train Set: 7M + 30M\n"
+                            f"Test Set: {conf['eval']}\n"
+                            f"Scaling: x / sqrt(d)\n"
+                            f"Bias Shift: {conf['bias_text']}\n\n"
                             f"Test R²: {conf['r2']:.4f}\n"
                             f"Test MAE: {conf['mae']:.1f}")
             props = dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray')

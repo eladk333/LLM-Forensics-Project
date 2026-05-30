@@ -98,12 +98,13 @@ def generate_all_plots():
         print(f"{model_name:<15} | {r2:<10.4f} | {mae:<12.2f}")
 
         fig, ax = plt.subplots(figsize=(9, 6))
-        ax.scatter(y, y_pred, color=MODEL_COLORS[model_name], alpha=0.6)
-        ax.plot([y.min(), y.max()], [y.min(), y.max()], 'k--', alpha=0.5)
+        ax.scatter(y, y_pred, color=MODEL_COLORS[model_name], alpha=0.6, label="CV Predictions")
+        ax.plot([y.min(), y.max()], [y.min(), y.max()], 'k--', alpha=0.5, label="Perfect Fit (Y=X)")
         ax.set_title(f"Internal Forensic Accuracy: {model_name}")
         ax.set_xlabel("Actual Steps")
         ax.set_ylabel("Predicted Steps")
         add_stats_box(ax, r2, mae, "Internal CV (Linear Hybrid)")
+        ax.legend(loc='lower right')  # הוספת מקרא
         plt.savefig(os.path.join(OUTPUT_DIR, f"cv_internal_{model_name.replace(' ', '_')}.png"), dpi=300)
         plt.close()
 
@@ -132,9 +133,12 @@ def generate_all_plots():
             # Physical Curve Plot
             test_sorted = test.sort_values(cols[0])
             plt.figure(figsize=(9, 6))
-            plt.scatter(test_sorted[cols[0]], test_sorted['Step'], color='#FFFF99', edgecolors='k', label="Actual 124M")
-            plt.plot(test_sorted[cols[0]], inverse_exp_func(test_sorted[cols[0]], *popt), 'r--', label="Exp Curve")
+            plt.scatter(test_sorted[cols[0]], test_sorted['Step'], color='#FFFF99', edgecolors='k', label="Actual 124M Data")
+            plt.plot(test_sorted[cols[0]], inverse_exp_func(test_sorted[cols[0]], *popt), 'r--', label="Exponential Curve Fit")
             plt.title(f"Zero-Shot Physical Curve: {cols[0]}")
+            plt.xlabel(cols[0])
+            plt.ylabel("Step")
+            plt.legend(loc='lower right')  # הוספת מקרא
             plt.savefig(os.path.join(OUTPUT_DIR, "zs_physical_curve_exp.png"))
             plt.close()
         else:
@@ -147,10 +151,13 @@ def generate_all_plots():
         print(f"{scenario_name:<40} | {r2:<10.4f} | {mae:<12.2f}")
 
         fig, ax = plt.subplots(figsize=(9, 6))
-        ax.scatter(y_test_actual, y_pred, color='blue', alpha=0.6)
-        ax.plot([y_test_actual.min(), y_test_actual.max()], [y_test_actual.min(), y_test_actual.max()], 'r--')
+        ax.scatter(y_test_actual, y_pred, color='blue', alpha=0.6, label="Zero-Shot Predictions")
+        ax.plot([y_test_actual.min(), y_test_actual.max()], [y_test_actual.min(), y_test_actual.max()], 'r--', label="Perfect Fit (Y=X)")
         ax.set_title(f"Zero-Shot: {scenario_name}")
+        ax.set_xlabel("Actual Steps")
+        ax.set_ylabel("Predicted Steps")
         add_stats_box(ax, r2, mae, f"Model: {mode}")
+        ax.legend(loc='lower right')  # הוספת מקרא
         plt.savefig(os.path.join(OUTPUT_DIR, filename), dpi=300)
         plt.close()
 
@@ -163,9 +170,13 @@ def generate_all_plots():
         print(f"{scenario_mlp:<40} | {r2_m:<10.4f} | {mae_m:<12.2f}")
 
         fig, ax = plt.subplots(figsize=(9, 6))
-        ax.scatter(y_test_actual, y_pred_mlp, color='darkgreen', alpha=0.6)
-        ax.plot([y_test_actual.min(), y_test_actual.max()], [y_test_actual.min(), y_test_actual.max()], 'r--')
+        ax.scatter(y_test_actual, y_pred_mlp, color='darkgreen', alpha=0.6, label="MLP Predictions")
+        ax.plot([y_test_actual.min(), y_test_actual.max()], [y_test_actual.min(), y_test_actual.max()], 'r--', label="Perfect Fit (Y=X)")
+        ax.set_title(f"Zero-Shot: {scenario_mlp}")
+        ax.set_xlabel("Actual Steps")
+        ax.set_ylabel("Predicted Steps")
         add_stats_box(ax, r2_m, mae_m, "Model: MLP")
+        ax.legend(loc='lower right')  # הוספת מקרא
         plt.savefig(os.path.join(OUTPUT_DIR, f"zs_mlp_{filename}"), dpi=300)
         plt.close()
 
@@ -180,11 +191,33 @@ def generate_all_plots():
     r2_p, mae_p = r2_score(y_te_h, y_p), mean_absolute_error(y_te_h, y_p)
     print(f"{'Combined (Polynomial D2)':<40} | {r2_p:<10.4f} | {mae_p:<12.2f}")
 
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.scatter(y_te_h, y_p, color='purple', alpha=0.6, label="Polynomial Predictions")
+    ax.plot([y_te_h.min(), y_te_h.max()], [y_te_h.min(), y_te_h.max()], 'r--', label="Perfect Fit (Y=X)")
+    ax.set_title("Zero-Shot: Combined Features (Polynomial Degree 2)")
+    ax.set_xlabel("Actual Steps")
+    ax.set_ylabel("Predicted Steps")
+    add_stats_box(ax, r2_p, mae_p, "Model: Polynomial Hybrid")
+    ax.legend(loc='lower right')  # הוספת מקרא
+    plt.savefig(os.path.join(OUTPUT_DIR, "zs_combined_polynomial.png"), dpi=300)
+    plt.close()
+
     # 2. Random Forest
     rf = make_pipeline(StandardScaler(), RandomForestRegressor(100, random_state=42)).fit(X_tr_h, y_tr_h)
     y_rf = rf.predict(X_te_h)
     r2_rf, mae_rf = r2_score(y_te_h, y_rf), mean_absolute_error(y_te_h, y_rf)
     print(f"{'Combined (Random Forest)':<40} | {r2_rf:<10.4f} | {mae_rf:<12.2f}")
+
+    fig, ax = plt.subplots(figsize=(9, 6))
+    ax.scatter(y_te_h, y_rf, color='orange', alpha=0.6, label="Random Forest Predictions")
+    ax.plot([y_te_h.min(), y_te_h.max()], [y_te_h.min(), y_te_h.max()], 'r--', label="Perfect Fit (Y=X)")
+    ax.set_title("Zero-Shot: Combined Features (Random Forest)")
+    ax.set_xlabel("Actual Steps")
+    ax.set_ylabel("Predicted Steps")
+    add_stats_box(ax, r2_rf, mae_rf, "Model: Random Forest Hybrid")
+    ax.legend(loc='lower right')  # הוספת מקרא
+    plt.savefig(os.path.join(OUTPUT_DIR, "zs_combined_random_forest.png"), dpi=300)
+    plt.close()
 
     print(f"\n{'='*65}\n✅ Analysis complete. Results in 'no_gui' folder.\n{'='*65}")
 

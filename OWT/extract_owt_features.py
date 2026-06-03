@@ -13,7 +13,7 @@ from torch.utils.data import Dataset, DataLoader
 BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 # Paths based on your tree structure
-DATA_CACHE_PATH = os.path.join(BASE_PATH, "data", "datasets", "owt_117M_full_cache.pt")
+DATA_CACHE_PATH = os.path.join(BASE_PATH, "data", "datasets", "owt_cache_b1a8d2c99f.pt")
 CHECKPOINT_BASE_DIR = os.path.join(BASE_PATH, "data", "models")
 OUTPUT_CSV = os.path.join(BASE_PATH, "OWT", "owt_extracted_features.csv")
 

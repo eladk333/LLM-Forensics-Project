@@ -9,7 +9,6 @@ import re
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'minGPT'))
 
 import torch
-import math
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from datasets import load_dataset
@@ -38,9 +37,8 @@ CHECKPOINT_FOLDER_PATH = os.path.join(MAIN_DIR, 'data', 'models', '124M_owt')
 DATA_CACHE_PATH = os.path.join(MAIN_DIR, 'data', 'datasets')
 os.makedirs(CHECKPOINT_FOLDER_PATH, exist_ok=True)
 
-# Safety factor for character-based collection before the single encode call.
-# GPT-2 BPE worst case is ~1 char/token. Factor 6 guarantees we always collect
-# more than enough characters before the single tokenizer.encode() call.
+# Empirically chosen safety factor for character-based collection.
+# If insufficient, a RuntimeError is raised before any training begins.
 CHAR_SAFETY_FACTOR = 6
 
 
@@ -68,6 +66,10 @@ class OWTDataset(Dataset):
         if os.path.exists(cache_path):
             print(f"Found cached data, loading from {cache_path}...")
             self.tokens = torch.load(cache_path)
+            assert len(self.tokens) == TARGET_TOKENS, (
+                f"Cache token count mismatch: expected {TARGET_TOKENS:,}, "
+                f"got {len(self.tokens):,}. Delete the cache file and re-run."
+            )
             print(f"Loaded {len(self.tokens)} tokens.")
 
         # If not, extract exactly the target amount from OpenWebText

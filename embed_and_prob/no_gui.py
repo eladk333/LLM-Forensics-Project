@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import os
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.neural_network import MLPRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler, PolynomialFeatures
@@ -83,6 +83,9 @@ def generate_all_plots():
         print("❌ Error: CSV files missing!")
         return
 
+    # List to store results for final ranking
+    final_rankings = []
+
     print(f"\n{'='*65}\n📊 PART 1: INTERNAL ARCHITECTURE ANALYSIS (CV)\n{'='*65}")
     print(f"{'Model':<15} | {'R² Score':<10} | {'MAE (Steps)':<12}")
     print("-" * 45)
@@ -98,13 +101,13 @@ def generate_all_plots():
         print(f"{model_name:<15} | {r2:<10.4f} | {mae:<12.2f}")
 
         fig, ax = plt.subplots(figsize=(9, 6))
-        ax.scatter(y, y_pred, color=MODEL_COLORS[model_name], alpha=0.6, label="CV Predictions")
+        ax.scatter(y, y_pred, color=MODEL_COLORS[model_name], alpha=0.6, label="CV Predictions (Folds=5)")
         ax.plot([y.min(), y.max()], [y.min(), y.max()], 'k--', alpha=0.5, label="Perfect Fit (Y=X)")
-        ax.set_title(f"Internal Forensic Accuracy: {model_name}")
-        ax.set_xlabel("Actual Steps")
-        ax.set_ylabel("Predicted Steps")
-        add_stats_box(ax, r2, mae, "Internal CV (Linear Hybrid)")
-        ax.legend(loc='lower right')  # הוספת מקרא
+        ax.set_title(f"Internal Forensic Accuracy: {model_name}\n(Using Embedding Norm & Next Token Prob)")
+        ax.set_xlabel("Actual Training Steps")
+        ax.set_ylabel("Predicted Training Steps")
+        add_stats_box(ax, r2, mae, f"Internal CV (Linear Hybrid)\nData: {model_name} Only")
+        ax.legend(loc='lower right') 
         plt.savefig(os.path.join(OUTPUT_DIR, f"cv_internal_{model_name.replace(' ', '_')}.png"), dpi=300)
         plt.close()
 
@@ -118,108 +121,133 @@ def generate_all_plots():
     print(f"{'Scenario (Model Type)':<40} | {'R² Score':<10} | {'MAE (Steps)':<12}")
     print("-" * 70)
 
+    # ADDED: Single-feature polynomial baseline for embedding_norm
     scenarios = [
-        (['embedding_norm'], "Linear", "zs_only_emb_norm.png"),
-        (['Avg_Probability'], "Exponential", "zs_only_prob.png"),
-        (['embedding_norm', 'Avg_Probability'], "Linear", "zs_combined_features.png")
+        (['embedding_norm'], "Linear", "zs_only_emb_norm_linear.png"),
+        (['embedding_norm'], "Polynomial", "zs_only_emb_norm_poly.png"),
+        (['Avg_Probability'], "Exponential", "zs_only_prob.png")
     ]
 
     for cols, mode, filename in scenarios:
-        # A) Standard
         if mode == "Exponential":
             popt, _ = curve_fit(inverse_exp_func, train[cols[0]].values, train['Step'].values, maxfev=10000)
             y_pred = inverse_exp_func(test[cols[0]].values, *popt)
             
-            # Physical Curve Plot
+            # Physical Curve Plot (Feature vs Step)
             test_sorted = test.sort_values(cols[0])
-            plt.figure(figsize=(9, 6))
-            plt.scatter(test_sorted[cols[0]], test_sorted['Step'], color='#FFFF99', edgecolors='k', label="Actual 124M Data")
-            plt.plot(test_sorted[cols[0]], inverse_exp_func(test_sorted[cols[0]], *popt), 'r--', label="Exponential Curve Fit")
-            plt.title(f"Zero-Shot Physical Curve: {cols[0]}")
-            plt.xlabel(cols[0])
-            plt.ylabel("Step")
-            plt.legend(loc='lower right')  # הוספת מקרא
-            plt.savefig(os.path.join(OUTPUT_DIR, "zs_physical_curve_exp.png"))
+            fig, ax = plt.subplots(figsize=(9, 6))
+            ax.scatter(test_sorted[cols[0]], test_sorted['Step'], color='#FFFF99', edgecolors='k', s=60, label="Actual Unseen 124M Data")
+            ax.plot(test_sorted[cols[0]], inverse_exp_func(test_sorted[cols[0]], *popt), 'r--', linewidth=2.5, label="Exponential Curve (Fitted on 7M+30M)")
+            ax.set_title(f"Zero-Shot Physical Projection:\n{cols[0]} mapped to Training Steps")
+            ax.set_xlabel(f"Scaled {cols[0]}")
+            ax.set_ylabel("Training Steps")
+            
+            r2, mae = r2_score(y_test_actual, y_pred), mean_absolute_error(y_test_actual, y_pred)
+            add_stats_box(ax, r2, mae, "Method: Exponential Curve Fit")
+            ax.legend(loc='lower right')
+            plt.savefig(os.path.join(OUTPUT_DIR, filename), dpi=300)
             plt.close()
-        else:
+            
+            scenario_name = f"{cols[0]} ({mode})"
+            print(f"{scenario_name:<40} | {r2:<10.4f} | {mae:<12.2f}")
+            final_rankings.append((scenario_name, r2, mae, filename))
+
+        elif mode == "Linear" and len(cols) == 1:
             model = make_pipeline(StandardScaler(), LinearRegression())
             model.fit(train[cols].values, train['Step'].values)
             y_pred = model.predict(test[cols].values)
-        
-        r2, mae = r2_score(y_test_actual, y_pred), mean_absolute_error(y_test_actual, y_pred)
-        scenario_name = f"{', '.join(cols)} ({mode})"
-        print(f"{scenario_name:<40} | {r2:<10.4f} | {mae:<12.2f}")
+            
+            test_sorted = test.sort_values(cols[0])
+            y_pred_sorted = model.predict(test_sorted[cols].values)
+            
+            fig, ax = plt.subplots(figsize=(9, 6))
+            ax.scatter(test_sorted[cols[0]], test_sorted['Step'], color='lightblue', edgecolors='k', s=60, label="Actual Unseen 124M Data")
+            ax.plot(test_sorted[cols[0]], y_pred_sorted, 'r--', linewidth=2.5, label="Linear Trend (Fitted on 7M+30M)")
+            ax.set_title(f"Zero-Shot Feature Projection:\n{cols[0]} mapped to Training Steps (Linear)")
+            ax.set_xlabel(f"Scaled {cols[0]}")
+            ax.set_ylabel("Training Steps")
+            
+            r2, mae = r2_score(y_test_actual, y_pred), mean_absolute_error(y_test_actual, y_pred)
+            add_stats_box(ax, r2, mae, "Method: Simple Linear Regression")
+            ax.legend(loc='lower right')
+            plt.savefig(os.path.join(OUTPUT_DIR, filename), dpi=300)
+            plt.close()
+            
+            scenario_name = f"{cols[0]} ({mode})"
+            print(f"{scenario_name:<40} | {r2:<10.4f} | {mae:<12.2f}")
+            final_rankings.append((scenario_name, r2, mae, filename))
 
-        fig, ax = plt.subplots(figsize=(9, 6))
-        ax.scatter(y_test_actual, y_pred, color='blue', alpha=0.6, label="Zero-Shot Predictions")
-        ax.plot([y_test_actual.min(), y_test_actual.max()], [y_test_actual.min(), y_test_actual.max()], 'r--', label="Perfect Fit (Y=X)")
-        ax.set_title(f"Zero-Shot: {scenario_name}")
-        ax.set_xlabel("Actual Steps")
-        ax.set_ylabel("Predicted Steps")
-        add_stats_box(ax, r2, mae, f"Model: {mode}")
-        ax.legend(loc='lower right')  # הוספת מקרא
-        plt.savefig(os.path.join(OUTPUT_DIR, filename), dpi=300)
-        plt.close()
+        elif mode == "Polynomial" and len(cols) == 1:
+            # ADDED: Single feature polynomial mapping (Degree 2)
+            model = make_pipeline(StandardScaler(), PolynomialFeatures(2), LinearRegression())
+            model.fit(train[cols].values, train['Step'].values)
+            y_pred = model.predict(test[cols].values)
+            
+            test_sorted = test.sort_values(cols[0])
+            y_pred_sorted = model.predict(test_sorted[cols].values)
+            
+            fig, ax = plt.subplots(figsize=(9, 6))
+            ax.scatter(test_sorted[cols[0]], test_sorted['Step'], color='plum', edgecolors='k', s=60, label="Actual Unseen 124M Data")
+            ax.plot(test_sorted[cols[0]], y_pred_sorted, 'g--', linewidth=2.5, label="Polynomial Trend (Deg 2) (Fitted on 7M+30M)")
+            ax.set_title(f"Zero-Shot Feature Projection:\n{cols[0]} mapped to Training Steps (Polynomial)")
+            ax.set_xlabel(f"Scaled {cols[0]}")
+            ax.set_ylabel("Training Steps")
+            
+            r2, mae = r2_score(y_test_actual, y_pred), mean_absolute_error(y_test_actual, y_pred)
+            add_stats_box(ax, r2, mae, "Method: Polynomial Regression (Deg 2)")
+            ax.legend(loc='lower right')
+            plt.savefig(os.path.join(OUTPUT_DIR, filename), dpi=300)
+            plt.close()
+            
+            scenario_name = f"{cols[0]} ({mode})"
+            print(f"{scenario_name:<40} | {r2:<10.4f} | {mae:<12.2f}")
+            final_rankings.append((scenario_name, r2, mae, filename))
 
-        # B) MLP
-        mlp = get_mlp_model()
-        mlp.fit(train[cols].values, train['Step'].values)
-        y_pred_mlp = mlp.predict(test[cols].values)
-        r2_m, mae_m = r2_score(y_test_actual, y_pred_mlp), mean_absolute_error(y_test_actual, y_pred_mlp)
-        scenario_mlp = f"{', '.join(cols)} (MLP)"
-        print(f"{scenario_mlp:<40} | {r2_m:<10.4f} | {mae_m:<12.2f}")
-
-        fig, ax = plt.subplots(figsize=(9, 6))
-        ax.scatter(y_test_actual, y_pred_mlp, color='darkgreen', alpha=0.6, label="MLP Predictions")
-        ax.plot([y_test_actual.min(), y_test_actual.max()], [y_test_actual.min(), y_test_actual.max()], 'r--', label="Perfect Fit (Y=X)")
-        ax.set_title(f"Zero-Shot: {scenario_mlp}")
-        ax.set_xlabel("Actual Steps")
-        ax.set_ylabel("Predicted Steps")
-        add_stats_box(ax, r2_m, mae_m, "Model: MLP")
-        ax.legend(loc='lower right')  # הוספת מקרא
-        plt.savefig(os.path.join(OUTPUT_DIR, f"zs_mlp_{filename}"), dpi=300)
-        plt.close()
-
-    # --- Advanced Hybrids ---
+    # --- Combined Features (Actual vs Predicted plots) ---
     hybrid_cols = ['embedding_norm', 'Avg_Probability']
     X_tr_h, y_tr_h = train[hybrid_cols].values, train['Step'].values
     X_te_h, y_te_h = test[hybrid_cols].values, test['Step'].values
 
-    # 1. Polynomial
-    poly = make_pipeline(StandardScaler(), PolynomialFeatures(2), LinearRegression()).fit(X_tr_h, y_tr_h)
-    y_p = poly.predict(X_te_h)
-    r2_p, mae_p = r2_score(y_te_h, y_p), mean_absolute_error(y_te_h, y_p)
-    print(f"{'Combined (Polynomial D2)':<40} | {r2_p:<10.4f} | {mae_p:<12.2f}")
+    combined_models = [
+        ("Combined (Linear Regression)", make_pipeline(StandardScaler(), LinearRegression()), "zs_combined_linear.png", "lightblue"),
+        ("Combined (Ridge L2)", make_pipeline(StandardScaler(), Ridge(alpha=1.0)), "zs_combined_ridge.png", "teal"),
+        ("Combined (Polynomial D2)", make_pipeline(StandardScaler(), PolynomialFeatures(2), LinearRegression()), "zs_combined_polynomial.png", "purple"),
+        ("Combined (Random Forest)", make_pipeline(StandardScaler(), RandomForestRegressor(100, random_state=42)), "zs_combined_random_forest.png", "orange"),
+        ("Combined (MLP Neural Net)", get_mlp_model(), "zs_combined_mlp.png", "darkgreen")
+    ]
 
-    fig, ax = plt.subplots(figsize=(9, 6))
-    ax.scatter(y_te_h, y_p, color='purple', alpha=0.6, label="Polynomial Predictions")
-    ax.plot([y_te_h.min(), y_te_h.max()], [y_te_h.min(), y_te_h.max()], 'r--', label="Perfect Fit (Y=X)")
-    ax.set_title("Zero-Shot: Combined Features (Polynomial Degree 2)")
-    ax.set_xlabel("Actual Steps")
-    ax.set_ylabel("Predicted Steps")
-    add_stats_box(ax, r2_p, mae_p, "Model: Polynomial Hybrid")
-    ax.legend(loc='lower right')  # הוספת מקרא
-    plt.savefig(os.path.join(OUTPUT_DIR, "zs_combined_polynomial.png"), dpi=300)
-    plt.close()
+    for model_name, pipeline, fname, color in combined_models:
+        pipeline.fit(X_tr_h, y_tr_h)
+        y_pred = pipeline.predict(X_te_h)
+        r2, mae = r2_score(y_te_h, y_pred), mean_absolute_error(y_te_h, y_pred)
+        print(f"{model_name:<40} | {r2:<10.4f} | {mae:<12.2f}")
+        
+        fig, ax = plt.subplots(figsize=(9, 6))
+        ax.scatter(y_te_h, y_pred, color=color, alpha=0.7, edgecolors='k', s=50, label=f"{model_name} Predictions")
+        ax.plot([y_te_h.min(), y_te_h.max()], [y_te_h.min(), y_te_h.max()], 'r--', linewidth=2, label="Perfect Fit (Y=X)")
+        ax.set_title(f"Zero-Shot Generalization Performance\nTraining: 7M+30M  |  Testing: 124M")
+        ax.set_xlabel("Actual 124M Training Steps")
+        ax.set_ylabel("Predicted Training Steps")
+        add_stats_box(ax, r2, mae, f"Algorithm: {model_name}\nFeatures: Norm & Probability")
+        ax.legend(loc='lower right')
+        plt.savefig(os.path.join(OUTPUT_DIR, fname), dpi=300)
+        plt.close()
+        
+        final_rankings.append((model_name, r2, mae, fname))
 
-    # 2. Random Forest
-    rf = make_pipeline(StandardScaler(), RandomForestRegressor(100, random_state=42)).fit(X_tr_h, y_tr_h)
-    y_rf = rf.predict(X_te_h)
-    r2_rf, mae_rf = r2_score(y_te_h, y_rf), mean_absolute_error(y_te_h, y_rf)
-    print(f"{'Combined (Random Forest)':<40} | {r2_rf:<10.4f} | {mae_rf:<12.2f}")
-
-    fig, ax = plt.subplots(figsize=(9, 6))
-    ax.scatter(y_te_h, y_rf, color='orange', alpha=0.6, label="Random Forest Predictions")
-    ax.plot([y_te_h.min(), y_te_h.max()], [y_te_h.min(), y_te_h.max()], 'r--', label="Perfect Fit (Y=X)")
-    ax.set_title("Zero-Shot: Combined Features (Random Forest)")
-    ax.set_xlabel("Actual Steps")
-    ax.set_ylabel("Predicted Steps")
-    add_stats_box(ax, r2_rf, mae_rf, "Model: Random Forest Hybrid")
-    ax.legend(loc='lower right')  # הוספת מקרא
-    plt.savefig(os.path.join(OUTPUT_DIR, "zs_combined_random_forest.png"), dpi=300)
-    plt.close()
-
-    print(f"\n{'='*65}\n✅ Analysis complete. Results in 'no_gui' folder.\n{'='*65}")
+    # --- Print Summary and Recommendations ---
+    print(f"\n{'='*65}\n🏆 ZERO-SHOT MODEL RANKING (BY LOWEST MAE)\n{'='*65}")
+    final_rankings.sort(key=lambda x: x[2])
+    
+    print(f"{'Rank':<5} | {'Model':<30} | {'MAE':<10} | {'R²':<8} | {'Filename'}")
+    print("-" * 80)
+    for idx, (name, r2, mae, fname) in enumerate(final_rankings, 1):
+        print(f"#{idx:<4} | {name:<30} | {mae:<10.1f} | {r2:<8.4f} | {fname}")
+        
+    print("\n💡 Recommendation for Presentation:")
+    print(f"-> Use '{final_rankings[0][3]}' as your best performing model.")
+    print(f"-> Use '{final_rankings[-1][3]}' as a baseline to show improvement.")
+    print(f"\n✅ All analysis complete. Results saved in '{OUTPUT_DIR}' folder.")
 
 if __name__ == "__main__":
     generate_all_plots()

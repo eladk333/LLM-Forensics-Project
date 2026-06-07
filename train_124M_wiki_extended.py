@@ -32,7 +32,7 @@ BATCH_SIZE = 32
 
 # Path configurations targeting original Wiki storage
 CHECKPOINT_FOLDER_PATH = os.path.join(os.getcwd(), 'data', 'models', '124M')
-DATA_CACHE_PATH = os.path.join(os.getcwd(), 'data', 'datasets')
+DATA_CACHE_PATH = os.path.join(os.getcwd(), 'data', 'wiki')
 os.makedirs(CHECKPOINT_FOLDER_PATH, exist_ok=True)
 
 class WikiDataset(Dataset):

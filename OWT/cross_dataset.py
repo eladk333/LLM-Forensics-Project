@@ -158,6 +158,12 @@ def run_cross_dataset_zero_shot():
             
             print(f"{model_name:<25} | {r2:<10.4f} | {mae:<12.2f}")
             
+            # --- NEW: Extract Feature Importance for Random Forest models ---
+            rf_importances = None
+            if model_name == 'Random Forest':
+                rf_importances = model.named_steps['randomforestregressor'].feature_importances_.copy()
+            # -------------------------------------------------------------
+            
             final_results.append({
                 'display_name': f"{scenario_name} ({model_name})",
                 'r2': r2,
@@ -167,7 +173,8 @@ def run_cross_dataset_zero_shot():
                 'y_pred': y_pred,
                 'y_test': y_test,
                 'models_test': models_test,
-                'features': features
+                'features': features,
+                'importances': rf_importances  # Added to the dictionary
             })
 
     # Global compilation summary ranking block
@@ -225,6 +232,41 @@ def run_cross_dataset_zero_shot():
         plt.close()
         
         print(f"Saved: {filename}")
+
+    # =================================================================================
+    # NEW BLOCK: Generating Feature Importance Graphs for Top 10 Random Forest Models
+    # =================================================================================
+    print(f"\n🔍 Generating Feature Importance plots for Random Forest models in the Top 10...")
+    for idx, item in enumerate(final_results[:10], 1):
+        if item['model_name'] == 'Random Forest' and item['importances'] is not None:
+            importances = item['importances']
+            features_list = item['features']
+            scenario_name = item['scenario_name']
+            
+            # Sort features by importance
+            indices = np.argsort(importances)[::-1]
+            sorted_features = [features_list[i] for i in indices]
+            sorted_importances = importances[indices]
+            
+            plt.figure(figsize=(8, 5))
+            colors = ['#005088', '#14B8A6', '#F59E0B', '#EF4444', '#8B5CF6'][:len(features_list)]
+            bars = plt.bar(sorted_features, sorted_importances, color=colors, edgecolor='black', alpha=0.8)
+            
+            plt.title(f"Top {idx}: Random Forest Feature Importance\nScenario: {scenario_name}", fontsize=13, fontweight='bold', pad=15)
+            plt.ylabel("Relative Importance (Gini Impurity)", fontsize=11)
+            plt.grid(axis='y', linestyle='--', alpha=0.6)
+            plt.xticks(rotation=15, ha='right', fontsize=9)
+            
+            # Add percentage labels on top of bars
+            for bar, v in zip(bars, sorted_importances):
+                plt.text(bar.get_x() + bar.get_width()/2, v + 0.01, f"{v*100:.1f}%", ha='center', fontweight='bold', fontsize=10)
+                
+            plt.tight_layout()
+            filename_fi = f"Top_{idx}_FI_{scenario_name}.png"
+            filepath_fi = os.path.join(OUTPUT_DIR, filename_fi)
+            plt.savefig(filepath_fi, dpi=300)
+            plt.close()
+            print(f"Saved Feature Importance Plot: {filename_fi}")
 
 if __name__ == "__main__":
     run_cross_dataset_zero_shot()

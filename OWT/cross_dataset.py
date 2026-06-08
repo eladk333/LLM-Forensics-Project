@@ -234,9 +234,9 @@ def run_cross_dataset_zero_shot():
         print(f"Saved: {filename}")
 
     # =================================================================================
-    # NEW BLOCK: Generating Feature Importance Graphs for Top 10 Random Forest Models
+    # NEW BLOCK: Generating Feature Importance Graphs & Printing Stats for Top 10 RF
     # =================================================================================
-    print(f"\n🔍 Generating Feature Importance plots for Random Forest models in the Top 10...")
+    print(f"\n🔍 Extracting Feature Importance for Random Forest models in the Top 10...")
     for idx, item in enumerate(final_results[:10], 1):
         if item['model_name'] == 'Random Forest' and item['importances'] is not None:
             importances = item['importances']
@@ -247,6 +247,12 @@ def run_cross_dataset_zero_shot():
             indices = np.argsort(importances)[::-1]
             sorted_features = [features_list[i] for i in indices]
             sorted_importances = importances[indices]
+            
+            # --- PRINT TO CONSOLE ---
+            print(f"\nTop {idx} Rank | Scenario: {scenario_name}")
+            for f_name, f_val in zip(sorted_features, sorted_importances):
+                print(f"  -> {f_name:<20}: {f_val*100:.2f}%")
+            # ------------------------
             
             plt.figure(figsize=(8, 5))
             colors = ['#005088', '#14B8A6', '#F59E0B', '#EF4444', '#8B5CF6'][:len(features_list)]

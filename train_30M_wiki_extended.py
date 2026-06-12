@@ -24,7 +24,7 @@ N_EMBD  = 384  # Increased from 384
 BATCH_SIZE = 32 # Same for all models
 
 # Paths - Updated to isolate the 3-epoch run
-CHECKPOINT_FOLDER_PATH = os.path.join(os.getcwd(), 'data', 'models', '30M_3epoch') 
+CHECKPOINT_FOLDER_PATH = os.path.join(os.getcwd(), 'data', 'models', '30M_wiki_3epoch') 
 DATA_CACHE_PATH = os.path.join(os.getcwd(), 'data', 'wiki')
 os.makedirs(CHECKPOINT_FOLDER_PATH, exist_ok=True) 
 
